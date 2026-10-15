@@ -179,3 +179,33 @@ shows a notice on Web Store pages that extensions cannot be installed yet.
 Verified: two runs, click "Add to Chrome" via CDP, app alive, no crash events.
 Residual risk: a click during the page load, before `OnLoadEnd`, could still
 reach the old path.
+
+## Extension spike #3: Chrome toolbar and child-window hosting (2026-10-15)
+
+Scripts kept in `spikes/` (`patch_cefsimple_child_host.py` adds a
+`--child-host` mode to CEF's `cefsimple`; `cdp_check.mjs` is the CDP checker).
+Both runs used the same uBlock Origin Lite + Dark Reader builds as spike #2.
+
+| Mode | Extensions run | Extension UI | Notes |
+|---|---|---|---|
+| `cefclient --use-views --show-chrome-toolbar` | Yes | **Full Chrome UI**: tab strip, toolbar, extensions (puzzle) button | It is a whole Chrome window, not our UI |
+| `cefsimple --child-host` (Chrome style, `SetAsChild` inside our own parent window) | **Yes**: uBOL blocked the ad request, Dark Reader darkened a light page (8 styles) | None (no toolbar) | This is the mode 6browser would use inside the Flutter window |
+
+New findings:
+- **Extension-opened tabs escape the host.** Dark Reader's `chrome.tabs.create`
+  opened a separate, full Chrome window ("Help – Dark Reader - Chromium")
+  outside our parent window. A real integration must intercept new tabs/popups
+  (to verify: `CefLifeSpanHandler::OnBeforePopup` / Chrome-style new-tab hooks).
+- **Child bounds:** the page appeared to cover the 64 px "Flutter toolbar" strip
+  reserved via `SetAsChild(parent, CefRect(0, 64, ...))`. A later measurement
+  was unreliable (window state changed). To verify; the host will have to
+  position the browser HWND itself on every resize anyway.
+- **External registry extensions** can be turned off with
+  `--disable-features=ExternalExtensions` (McAfee did not appear in these runs).
+
+What a 6browser on Chrome-style CEF would need to build itself, since CEF has no
+API for it: an extensions toolbar (read installed extensions' manifests from the
+profile for name/icon/popup), popups as small CEF child browsers
+(`chrome-extension://<id>/<popup>`; active-tab context and badge text are not
+available that way), and routing extension-created tabs into Flutter tabs.
+Still untested: Web Store "Add to Chrome" in Chrome style (needs a manual click).
