@@ -114,6 +114,17 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           const SizedBox(height: 24),
           Text('About', style: title),
           const SizedBox(height: 8),
+          Row(
+            children: [
+              Image.asset('assets/logo.png', width: 40, height: 40),
+              const SizedBox(width: 12),
+              Text(
+                '6browser',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
           const Text(
             '6browser · Flutter UI on CEF (Chromium 149)\n'
             'Chrome extensions are not supported yet (see docs/ENGINE.md).',

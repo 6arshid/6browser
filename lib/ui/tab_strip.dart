@@ -23,12 +23,19 @@ class TabStrip extends ConsumerWidget {
         builder: (context, box) {
           final unpinned = state.tabs.length - state.pinnedCount;
           final free =
-              box.maxWidth - stripHeight - state.pinnedCount * _pinnedWidth;
+              box.maxWidth -
+              stripHeight -
+              38 -
+              state.pinnedCount * _pinnedWidth;
           final width = unpinned == 0
               ? _maxTabWidth
               : (free / unpinned).clamp(_minTabWidth, _maxTabWidth);
           return Row(
             children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Image.asset('assets/logo.png', width: 22, height: 22),
+              ),
               Expanded(
                 child: ReorderableListView(
                   scrollDirection: Axis.horizontal,

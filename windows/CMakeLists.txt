@@ -52,6 +52,10 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
 
+# The CMake target must not start with a digit, but the shipped file should be
+# called 6browser.exe.
+set_target_properties(${BINARY_NAME} PROPERTIES OUTPUT_NAME "6browser")
+
 
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
