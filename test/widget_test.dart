@@ -27,6 +27,21 @@ void main() {
     });
   });
 
+  test('isWebStoreUrl', () {
+    expect(
+      isWebStoreUrl('https://chromewebstore.google.com/detail/x/abc'),
+      isTrue,
+    );
+    expect(
+      isWebStoreUrl('https://chrome.google.com/webstore/detail/x'),
+      isTrue,
+    );
+    expect(
+      isWebStoreUrl('https://www.google.com/search?q=chromewebstore'),
+      isFalse,
+    );
+  });
+
   test('isSecureUrl', () {
     expect(isSecureUrl('https://a.com'), isTrue);
     expect(isSecureUrl('http://a.com'), isFalse);

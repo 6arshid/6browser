@@ -282,6 +282,17 @@ void WebviewHandler::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFra
 
 void WebviewHandler::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                                int httpStatusCode) {
+    // 6browser patch: this (Alloy, off-screen) engine has no extension support
+    // and Chrome's Web Store install API crashes the browser process inside
+    // libcef. The API is added by Chrome's bindings after the page context is
+    // created, so remove it once the Web Store page has loaded.
+    const std::string loaded = frame->GetURL().ToString();
+    if (loaded.rfind("https://chromewebstore.google.com/", 0) == 0 ||
+        loaded.rfind("https://chrome.google.com/webstore", 0) == 0) {
+        frame->ExecuteJavaScript(
+            "try{if(window.chrome){delete chrome.webstorePrivate;}}catch(e){}",
+            frame->GetURL(), 0);
+    }
     if(onLoadEnd){
         onLoadEnd(browser->GetIdentifier(), frame->GetURL());
     }

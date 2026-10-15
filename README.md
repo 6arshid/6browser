@@ -19,7 +19,7 @@ A desktop web browser with a Flutter UI on top of the Chromium engine (CEF).
 | Persistent profile (cookies, localStorage, cache) | Works on Windows |
 | Incognito tabs (`Ctrl+Shift+N`, or `6browser.exe --incognito [url]`) | Works on Windows, as tabs, not a separate window |
 | Responsive layout (tab strip becomes a tab button below 720 px) | Works |
-| **Chrome extensions / Chrome Web Store install** | **Not supported** |
+| **Chrome extensions / Chrome Web Store install** | **Not supported** (Web Store pages show a notice; "Add to Chrome" is disabled to avoid an engine crash) |
 
 Shortcuts: `Ctrl+T` new tab, `Ctrl+W` close, `Ctrl+Shift+N` incognito tab,
 `Ctrl+L` focus address bar, `Ctrl+Tab` / `Ctrl+Shift+Tab` switch tab, `F5`

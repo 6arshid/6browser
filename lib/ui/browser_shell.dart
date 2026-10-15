@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/tabs/tabs_controller.dart';
+import '../features/tabs/url_input.dart';
 import 'tab_strip.dart';
 import 'toolbar.dart';
 
@@ -71,6 +72,13 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
               children: [
                 if (!compact) const TabStrip(),
                 BrowserToolbar(addressFocus: _addressFocus),
+                if (state.active != null)
+                  ValueListenableBuilder<String>(
+                    valueListenable: state.active!.view.url,
+                    builder: (_, url, _) => isWebStoreUrl(url)
+                        ? const _ExtensionsUnsupportedNotice()
+                        : const SizedBox.shrink(),
+                  ),
                 Expanded(
                   child: state.tabs.isEmpty
                       ? const Center(child: CircularProgressIndicator())
@@ -96,6 +104,35 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Shown on the Chrome Web Store: installing extensions is not supported by
+/// the current engine, so "Add to Chrome" deliberately does nothing.
+class _ExtensionsUnsupportedNotice extends StatelessWidget {
+  const _ExtensionsUnsupportedNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      color: scheme.secondaryContainer,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        children: [
+          Icon(Icons.extension_off, color: scheme.onSecondaryContainer),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '6browser cannot install Chrome extensions yet, so '
+              '"Add to Chrome" will not work here.',
+              style: TextStyle(color: scheme.onSecondaryContainer),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -23,6 +23,12 @@ String resolveInput(
 /// True when [url] is served over HTTPS (drives the lock indicator).
 bool isSecureUrl(String url) => url.startsWith('https://');
 
+/// True on the Chrome Web Store, where "Add to Chrome" cannot work in this
+/// engine (see docs/ENGINE.md).
+bool isWebStoreUrl(String url) =>
+    url.startsWith('https://chromewebstore.google.com/') ||
+    url.startsWith('https://chrome.google.com/webstore');
+
 /// Only real web pages can be bookmarked (not blank/internal pages).
 bool isBookmarkable(String url) =>
     url.startsWith('http://') || url.startsWith('https://');

@@ -83,6 +83,24 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('Web Store pages show the extensions-unsupported notice', (
+    tester,
+  ) async {
+    final c = await pumpShell(tester, const Size(1200, 800));
+    expect(find.byIcon(Icons.extension_off), findsNothing);
+    c
+        .read(tabsProvider)
+        .active!
+        .view
+        .load(
+          'https://chromewebstore.google.com/detail/dark-reader/eimadpbcbfnmbkopoojfekhnkhdbieeh',
+        );
+    await tester.pump();
+    expect(find.byIcon(Icons.extension_off), findsOneWidget);
+    // The old URL's bookmark stream was cancelled; flush drift's timer.
+    await tester.pump(const Duration(milliseconds: 10));
+  });
+
   testWidgets('Ctrl+Shift+N opens an incognito tab', (tester) async {
     final c = await pumpShell(tester, const Size(1200, 800));
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);

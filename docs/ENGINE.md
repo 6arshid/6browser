@@ -162,3 +162,20 @@ are (1) the toolbar/popup UI, (2) Web Store install confirmation, (3) hosting
 the windowed browser as a child of the Flutter window, and (4) ignoring other
 programs' registry-installed extensions. These decide whether option B is
 viable for 6browser.
+
+## Crash fix: "Add to Chrome" on the Web Store (2026-10-15)
+
+Reported by the user: clicking "Add to Chrome" closed 6browser. Reproduced via
+CDP: the **browser process** crashed in `libcef.dll` (access violation, offset
+`0x42520b5`) right after the click. The Alloy/OSR engine still exposes
+`chrome.webstorePrivate` on the store, but calling its install path crashes.
+
+Fix (`6browser patch` in `common/webview_handler.cc`, `OnLoadEnd`): after a Web
+Store page loads, delete `chrome.webstorePrivate` from the page. Doing it in the
+renderer's `OnContextCreated` did not work, because Chrome's bindings add the
+property after that point. The store then cannot start an install. The Flutter UI
+shows a notice on Web Store pages that extensions cannot be installed yet.
+
+Verified: two runs, click "Add to Chrome" via CDP, app alive, no crash events.
+Residual risk: a click during the page load, before `OnLoadEnd`, could still
+reach the old path.
