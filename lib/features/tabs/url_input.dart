@@ -39,3 +39,13 @@ const newTabUrl = 'about:blank';
 
 /// True while a tab shows the New Tab page.
 bool isNewTabUrl(String url) => url.isEmpty || url == newTabUrl;
+
+/// Short form of [url] for an unfocused address bar on small screens, like
+/// Chrome on Android: just the host, without `www.`. Non-web addresses are
+/// shown as they are.
+String displayHost(String url) {
+  if (!isBookmarkable(url)) return url;
+  final host = Uri.tryParse(url)?.host ?? '';
+  if (host.isEmpty) return url;
+  return host.startsWith('www.') ? host.substring(4) : host;
+}

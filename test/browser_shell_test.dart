@@ -67,6 +67,39 @@ void main() {
     expect(find.text('2 tabs'), findsOneWidget);
   });
 
+  testWidgets('phone address bar shows the host, full URL while editing', (
+    tester,
+  ) async {
+    final c = await pumpShell(tester, const Size(400, 800));
+    c.read(tabsProvider).active!.view.load('https://www.example.com/a/b?q=1');
+    await tester.pump();
+    String field() =>
+        tester.widget<TextField>(find.byType(TextField)).controller!.text;
+    expect(field(), 'example.com');
+
+    await tester.tap(find.byType(TextField));
+    await tester.pump();
+    expect(field(), 'https://www.example.com/a/b?q=1');
+    expect(find.byTooltip('Back'), findsNothing); // bar takes the whole row
+    expect(find.byTooltip('Cancel'), findsOneWidget);
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+    expect(field(), 'example.com');
+    expect(find.byTooltip('Back'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 10));
+  });
+
+  testWidgets('address bar survives a large system font', (tester) async {
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    final c = await pumpShell(tester, const Size(360, 700));
+    c.read(tabsProvider).active!.view.load('https://example.com/');
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    await tester.pump(const Duration(milliseconds: 10));
+  });
+
   testWidgets('no overflow when the window is very narrow', (tester) async {
     await pumpShell(tester, const Size(320, 600));
     expect(tester.takeException(), isNull);

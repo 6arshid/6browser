@@ -47,6 +47,9 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
   final _address = TextEditingController();
   BrowserView? _bound;
 
+  /// Small-screen layout; the unfocused address bar then shows only the host.
+  bool _compact = false;
+
   @override
   void initState() {
     super.initState();
@@ -63,7 +66,16 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
   }
 
   void _onFocus() {
-    if (!widget.addressFocus.hasFocus) _syncAddress();
+    if (widget.addressFocus.hasFocus) {
+      // Editing always starts from the full URL, all selected.
+      final full = _full(_bound?.url.value ?? '');
+      _address.value = TextEditingValue(
+        text: full,
+        selection: TextSelection(baseOffset: 0, extentOffset: full.length),
+      );
+    } else {
+      _syncAddress();
+    }
     setState(() {});
   }
 
@@ -73,16 +85,26 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
     _bound?.url.removeListener(_syncAddress);
     _bound = view;
     view?.url.addListener(_syncAddress);
-    _address.text = _shown(view?.url.value ?? '');
+    _setShown();
   }
 
   /// The New Tab page shows an empty address bar.
-  String _shown(String url) => isNewTabUrl(url) ? '' : url;
+  String _full(String url) => isNewTabUrl(url) ? '' : url;
 
   void _syncAddress() {
-    if (!widget.addressFocus.hasFocus) {
-      _address.text = _shown(_bound?.url.value ?? '');
-    }
+    if (!widget.addressFocus.hasFocus) _setShown();
+  }
+
+  /// Unfocused text, with the caret at the start so the beginning of the
+  /// address is visible rather than its tail.
+  void _setShown() {
+    final full = _full(_bound?.url.value ?? '');
+    final text = _compact ? displayHost(full) : full;
+    if (_address.text == text) return;
+    _address.value = TextEditingValue(
+      text: text,
+      selection: const TextSelection.collapsed(offset: 0),
+    );
   }
 
   @override
@@ -90,8 +112,14 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
     final state = ref.watch(tabsProvider);
     final settings = ref.watch(appSettingsProvider);
     final view = state.active?.view;
-    _bind(view);
     final compact = MediaQuery.sizeOf(context).width < compactBreakpoint;
+    if (compact != _compact) {
+      _compact = compact;
+      _syncAddress();
+    }
+    _bind(view);
+    // On phones the address bar takes the whole row while editing.
+    final editing = compact && widget.addressFocus.hasFocus;
     final colors = BrowserColors.of(context);
 
     void go(String text) {
@@ -102,7 +130,7 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
     Widget button(String tooltip, IconData icon, VoidCallback? onPressed) =>
         IconButton(
           tooltip: tooltip,
-          iconSize: 20,
+          iconSize: compact ? 22 : 20,
           color: colors.icon,
           disabledColor: colors.icon.withValues(alpha: 0.38),
           icon: Icon(icon),
@@ -134,13 +162,16 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(6, 5, 6, 5),
+            padding: compact
+                ? const EdgeInsets.fromLTRB(4, 6, 2, 6)
+                : const EdgeInsets.fromLTRB(6, 5, 6, 5),
             child: Row(
               children: [
-                button('Back', Icons.arrow_back, view?.goBack),
+                if (editing) const SizedBox(width: 6),
+                if (!editing) button('Back', Icons.arrow_back, view?.goBack),
                 if (!compact)
                   button('Forward', Icons.arrow_forward, view?.goForward),
-                reload,
+                if (!editing) reload,
                 if (!compact)
                   button(
                     'Home',
@@ -153,11 +184,14 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
                     controller: _address,
                     focus: widget.addressFocus,
                     view: view,
+                    compact: compact,
                     onGo: go,
                   ),
                 ),
                 const SizedBox(width: 6),
-                if (view != null)
+                if (editing)
+                  button('Cancel', Icons.close, widget.addressFocus.unfocus),
+                if (view != null && !editing)
                   ValueListenableBuilder<String>(
                     valueListenable: view.url,
                     builder: (_, url, _) => switch (webStoreItemId(url)) {
@@ -176,8 +210,9 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
                       null => const SizedBox.shrink(),
                     },
                   ),
-                if (compact) _TabCountButton(count: state.tabs.length),
-                _MainMenu(view: view, compact: compact),
+                if (compact && !editing)
+                  _TabCountButton(count: state.tabs.length),
+                if (!editing) _MainMenu(view: view, compact: compact),
               ],
             ),
           ),
@@ -207,12 +242,14 @@ class _Omnibox extends ConsumerWidget {
     required this.controller,
     required this.focus,
     required this.view,
+    required this.compact,
     required this.onGo,
   });
 
   final TextEditingController controller;
   final FocusNode focus;
   final BrowserView? view;
+  final bool compact;
   final ValueChanged<String> onGo;
 
   @override
@@ -222,10 +259,13 @@ class _Omnibox extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     final focused = focus.hasFocus;
     final view = this.view;
+    final height = compact ? 44.0 : 36.0;
+    final fontSize = compact ? 15.0 : 14.0;
+    final radius = BorderRadius.circular(height / 2);
 
     return LayoutBuilder(
       builder: (context, box) => SizedBox(
-        height: 36,
+        height: height,
         child: RawAutocomplete<String>(
           textEditingController: controller,
           focusNode: focus,
@@ -234,48 +274,67 @@ class _Omnibox extends ConsumerWidget {
             return db.suggest(value.text);
           },
           onSelected: onGo,
-          fieldViewBuilder: (context, controller, focus, _) => TextField(
-            controller: controller,
-            focusNode: focus,
-            style: TextStyle(fontSize: 14, color: colors.omniboxText),
-            cursorColor: scheme.primary,
-            decoration: InputDecoration(
-              isDense: true,
-              filled: true,
-              fillColor: focused ? colors.toolbar : colors.omnibox,
-              hoverColor: colors.omniboxText.withValues(alpha: 0.04),
-              contentPadding: const EdgeInsets.symmetric(vertical: 10),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(18),
-                borderSide: BorderSide.none,
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(18),
-                borderSide: BorderSide(color: scheme.primary, width: 2),
-              ),
-              hintText: view?.incognito == true
-                  ? 'Search privately or type a URL'
-                  : 'Search Google or type a URL',
-              hintStyle: TextStyle(
-                fontSize: 14,
-                color: colors.omniboxText.withValues(alpha: 0.6),
-              ),
-              prefixIconConstraints: const BoxConstraints(minWidth: 40),
-              prefixIcon: view == null
-                  ? null
-                  : ValueListenableBuilder<String>(
-                      valueListenable: view.url,
-                      builder: (_, url, _) =>
-                          _SiteChip(url: url, color: colors.omniboxText),
+          // A large system font size must not overflow the fixed-height bar.
+          fieldViewBuilder: (context, controller, focus, _) =>
+              MediaQuery.withClampedTextScaling(
+                maxScaleFactor: 1.15,
+                child: TextField(
+                  controller: controller,
+                  focusNode: focus,
+                  // URLs read left to right even in an RTL UI.
+                  textDirection: TextDirection.ltr,
+                  textAlignVertical: TextAlignVertical.center,
+                  keyboardType: TextInputType.url,
+                  textInputAction: TextInputAction.go,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  style: TextStyle(
+                    fontSize: fontSize,
+                    height: 1.2,
+                    color: colors.omniboxText,
+                  ),
+                  cursorColor: scheme.primary,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    filled: true,
+                    fillColor: focused ? colors.toolbar : colors.omnibox,
+                    hoverColor: colors.omniboxText.withValues(alpha: 0.04),
+                    constraints: BoxConstraints.tightFor(height: height),
+                    contentPadding: EdgeInsets.zero,
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: radius,
+                      borderSide: BorderSide.none,
                     ),
-              suffixIcon: view == null ? null : _BookmarkStar(view: view),
-            ),
-            onTap: () => controller.selection = TextSelection(
-              baseOffset: 0,
-              extentOffset: controller.text.length,
-            ),
-            onSubmitted: onGo,
-          ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: radius,
+                      borderSide: BorderSide(color: scheme.primary, width: 2),
+                    ),
+                    hintText: view?.incognito == true
+                        ? 'Search privately or type a URL'
+                        : 'Search Google or type a URL',
+                    hintStyle: TextStyle(
+                      fontSize: fontSize,
+                      color: colors.omniboxText.withValues(alpha: 0.6),
+                    ),
+                    prefixIconConstraints: BoxConstraints(
+                      minWidth: compact ? 44 : 40,
+                    ),
+                    prefixIcon: view == null
+                        ? null
+                        : ValueListenableBuilder<String>(
+                            valueListenable: view.url,
+                            builder: (_, url, _) =>
+                                _SiteChip(url: url, color: colors.omniboxText),
+                          ),
+                    suffixIcon: view == null ? null : _BookmarkStar(view: view),
+                  ),
+                  onTap: () => controller.selection = TextSelection(
+                    baseOffset: 0,
+                    extentOffset: controller.text.length,
+                  ),
+                  onSubmitted: onGo,
+                ),
+              ),
           optionsViewBuilder: (context, onSelected, options) => Align(
             alignment: Alignment.topLeft,
             child: Padding(
