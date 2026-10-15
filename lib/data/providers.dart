@@ -14,3 +14,8 @@ final databaseProvider = Provider<AppDatabase>((ref) {
 final isBookmarkedProvider = StreamProvider.autoDispose.family<bool, String>(
   (ref, url) => ref.watch(databaseProvider).watchIsBookmarked(url),
 );
+
+/// All bookmarks, newest first (see [AppDatabase.watchBookmarks]).
+final bookmarksProvider = StreamProvider<List<Bookmark>>(
+  (ref) => ref.watch(databaseProvider).watchBookmarks(),
+);

@@ -25,11 +25,23 @@ class AppSettings {
     this.themeMode = ThemeMode.system,
     this.searchTemplate = 'https://www.google.com/search?q=%s',
     this.homeUrl = defaultHomeUrl,
+    this.colorSeed,
+    this.chromeTheme = '',
+    this.showBookmarksBar = false,
   });
 
   final ThemeMode themeMode;
   final String searchTemplate;
   final String homeUrl;
+
+  /// Accent color picked under Appearance; null for the default look.
+  final Color? colorSeed;
+
+  /// Folder name of the installed Chrome theme in use; empty for none.
+  final String chromeTheme;
+
+  /// Show the bookmarks bar on every page (otherwise only on New Tab).
+  final bool showBookmarksBar;
 
   static const defaults = AppSettings();
 
@@ -45,6 +57,12 @@ class AppSettings {
     homeUrl: (m['homeUrl'] ?? '').trim().isEmpty
         ? defaultHomeUrl
         : m['homeUrl']!.trim(),
+    colorSeed: switch (int.tryParse(m['colorSeed'] ?? '')) {
+      final v? => Color(v),
+      null => null,
+    },
+    chromeTheme: m['chromeTheme'] ?? '',
+    showBookmarksBar: m['bookmarksBar'] == 'true',
   );
 }
 

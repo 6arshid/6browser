@@ -2,11 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../features/bookmarks/bookmarks_page.dart';
+import '../features/downloads/downloads_page.dart';
+import '../features/history/history_page.dart';
 import '../features/new_tab/new_tab_page.dart';
+import '../features/settings/app_settings.dart';
 import '../features/tabs/tabs_controller.dart';
 import '../features/tabs/url_input.dart';
+import '../features/themes/theme_service.dart';
+import 'bookmarks_bar.dart';
+import 'browser_theme.dart';
 import 'tab_strip.dart';
 import 'toolbar.dart';
+import 'window_caption.dart';
 
 /// Main window: tab strip (wide) or tab button (narrow), toolbar, page area.
 class BrowserShell extends ConsumerStatefulWidget {
@@ -37,6 +45,23 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
     final state = ref.watch(tabsProvider);
     final ctl = ref.read(tabsProvider.notifier);
     final compact = MediaQuery.sizeOf(context).width < compactBreakpoint;
+    final settings = ref.watch(appSettingsProvider);
+    final view = state.active?.view;
+    final colors = BrowserColors.of(context);
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => WindowCaption.apply(colors.frame),
+    );
+
+    // A private tab gets a dark toolbar, whatever the theme.
+    Widget chrome(Widget child) => view?.incognito == true
+        ? Theme(
+            data: buildTheme(
+              brightness: Brightness.dark,
+              colors: BrowserColors.incognito,
+            ),
+            child: child,
+          )
+        : child;
 
     return CallbackShortcuts(
       bindings: {
@@ -61,24 +86,50 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
         ): () =>
             ctl.cycle(delta: -1),
         const SingleActivator(LogicalKeyboardKey.f12): () =>
-            state.active?.view.openDevTools(),
-        const SingleActivator(LogicalKeyboardKey.f5): () =>
-            state.active?.view.reload(),
+            view?.openDevTools(),
+        const SingleActivator(LogicalKeyboardKey.f5): () => view?.reload(),
+        const SingleActivator(LogicalKeyboardKey.keyR, control: true): () =>
+            view?.reload(),
+        const SingleActivator(LogicalKeyboardKey.arrowLeft, alt: true): () =>
+            view?.goBack(),
+        const SingleActivator(LogicalKeyboardKey.arrowRight, alt: true): () =>
+            view?.goForward(),
+        const SingleActivator(LogicalKeyboardKey.keyH, control: true): () =>
+            openPage(context, const HistoryPage()),
+        const SingleActivator(LogicalKeyboardKey.keyJ, control: true): () =>
+            openPage(context, const DownloadsPage()),
+        const SingleActivator(
+          LogicalKeyboardKey.keyO,
+          control: true,
+          shift: true,
+        ): () =>
+            openPage(context, const BookmarksPage()),
+        const SingleActivator(
+          LogicalKeyboardKey.keyB,
+          control: true,
+          shift: true,
+        ): () =>
+            toggleBookmarksBar(ref),
       },
       child: Focus(
         autofocus: true,
         child: Scaffold(
+          backgroundColor: colors.frame,
           body: SafeArea(
             child: Column(
               children: [
                 if (!compact) const TabStrip(),
-                BrowserToolbar(addressFocus: _addressFocus),
-                if (state.active != null)
+                chrome(BrowserToolbar(addressFocus: _addressFocus)),
+                if (view != null)
                   ValueListenableBuilder<String>(
-                    valueListenable: state.active!.view.url,
-                    builder: (_, url, _) => isWebStoreUrl(url)
-                        ? const _ExtensionsUnsupportedNotice()
-                        : const SizedBox.shrink(),
+                    valueListenable: view.url,
+                    builder: (_, url, _) => Column(
+                      children: [
+                        if (settings.showBookmarksBar || isNewTabUrl(url))
+                          chrome(const BookmarksBar()),
+                        if (isWebStoreUrl(url)) _WebStoreBar(url: url),
+                      ],
+                    ),
                   ),
                 Expanded(
                   child: state.tabs.isEmpty
@@ -124,30 +175,43 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
   }
 }
 
-/// Shown on the Chrome Web Store: installing extensions is not supported by
-/// the current engine, so "Add to Chrome" deliberately does nothing.
-class _ExtensionsUnsupportedNotice extends StatelessWidget {
-  const _ExtensionsUnsupportedNotice();
+/// Shown on the Chrome Web Store: themes can be installed from a theme's
+/// page; extensions cannot be installed by the current engine, so "Add to
+/// Chrome" deliberately does nothing (see docs/ENGINE.md).
+class _WebStoreBar extends ConsumerWidget {
+  const _WebStoreBar({required this.url});
+
+  final String url;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
+    final id = webStoreItemId(url);
+    return Material(
       color: scheme.secondaryContainer,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: Row(
-        children: [
-          Icon(Icons.extension_off, color: scheme.onSecondaryContainer),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '6browser cannot install Chrome extensions yet, so '
-              '"Add to Chrome" will not work here.',
-              style: TextStyle(color: scheme.onSecondaryContainer),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Row(
+          children: [
+            Icon(
+              id == null ? Icons.palette_outlined : Icons.extension_off,
+              size: 20,
+              color: scheme.onSecondaryContainer,
             ),
-          ),
-        ],
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                id == null
+                    ? 'Chrome themes from this store work in 6browser: open a '
+                          'theme to install it. Extensions are not supported yet.'
+                    : '"Add to Chrome" does not work in 6browser. For a theme, '
+                          'use "Install theme" next to the address bar. '
+                          'Extensions are not supported yet.',
+                style: TextStyle(color: scheme.onSecondaryContainer),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/providers.dart';
 import '../../engine/browser_engine.dart';
+import '../../ui/browser_theme.dart';
 import '../settings/app_settings.dart';
+import '../settings/appearance_settings.dart';
 import '../tabs/tabs_controller.dart';
 import '../tabs/url_input.dart';
 import 'new_tab_tiles.dart';
@@ -20,35 +22,95 @@ class NewTabPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
+    final colors = view.incognito
+        ? BrowserColors.incognito
+        : BrowserColors.of(context);
+    final image = view.incognito ? null : colors.ntpImage;
     return DecoratedBox(
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [scheme.surface, scheme.surfaceContainer],
-        ),
+        color: colors.ntpBackground,
+        image: image == null
+            ? null
+            : DecorationImage(
+                image: image,
+                alignment: colors.ntpAlignment,
+                repeat: colors.ntpRepeat,
+                fit: colors.ntpRepeat == ImageRepeat.noRepeat
+                    ? BoxFit.cover
+                    : BoxFit.none,
+              ),
       ),
-      child: LayoutBuilder(
-        builder: (context, box) => SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(minWidth: box.maxWidth),
-            child: Column(
-              children: [
-                SizedBox(height: (box.maxHeight * 0.14).clamp(24, 140)),
-                if (view.incognito) const _IncognitoHeader(),
-                _SearchBox(view: view),
-                const SizedBox(height: 40),
-                if (!view.incognito) _TileGrid(view: view),
-                const SizedBox(height: 40),
-              ],
-            ),
+      child: DefaultTextStyle.merge(
+        style: TextStyle(
+          color: colors.ntpText,
+          shadows: image == null
+              ? null
+              : const [Shadow(blurRadius: 4, color: Colors.black54)],
+        ),
+        child: IconTheme.merge(
+          data: IconThemeData(color: colors.ntpText),
+          child: Stack(
+            children: [
+              LayoutBuilder(
+                builder: (context, box) => SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minWidth: box.maxWidth),
+                    child: Column(
+                      children: [
+                        SizedBox(height: (box.maxHeight * 0.12).clamp(24, 120)),
+                        if (view.incognito)
+                          const _IncognitoHeader()
+                        else
+                          const _Logo(),
+                        _SearchBox(view: view),
+                        const SizedBox(height: 36),
+                        if (!view.incognito) _TileGrid(view: view),
+                        const SizedBox(height: 72),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              if (!view.incognito)
+                PositionedDirectional(
+                  end: 16,
+                  bottom: 16,
+                  child: FilledButton.tonalIcon(
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                    label: const Text('Customize'),
+                    onPressed: () => showCustomizePanel(context),
+                  ),
+                ),
+            ],
           ),
         ),
       ),
     );
   }
+}
+
+class _Logo extends StatelessWidget {
+  const _Logo();
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 28),
+    child: Column(
+      children: [
+        Image.asset('assets/logo.png', width: 72, height: 72),
+        const SizedBox(height: 10),
+        Text(
+          '6browser',
+          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+            fontWeight: FontWeight.w500,
+            color: DefaultTextStyle.of(context).style.color,
+            shadows: DefaultTextStyle.of(context).style.shadows,
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _IncognitoHeader extends StatelessWidget {
@@ -86,28 +148,56 @@ class _SearchBox extends ConsumerWidget {
     final engine = searchEngines
         .where((e) => e.template == settings.searchTemplate)
         .firstOrNull;
+    final colors = BrowserColors.of(context);
+    final scheme = Theme.of(context).colorScheme;
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 640),
-      child: TextField(
-        key: const ValueKey('newtab-search'),
-        decoration: InputDecoration(
-          filled: true,
-          prefixIcon: const Icon(Icons.search),
-          hintText: engine == null
-              ? 'Search or enter address'
-              : 'Search with ${engine.name} or enter address',
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(28),
-            borderSide: BorderSide.none,
+      constraints: const BoxConstraints(maxWidth: 600),
+      child: Material(
+        elevation: 2,
+        shadowColor: Colors.black38,
+        borderRadius: BorderRadius.circular(28),
+        color: view.incognito
+            ? BrowserColors.incognito.omnibox
+            : colors.toolbar,
+        child: TextField(
+          key: const ValueKey('newtab-search'),
+          style: TextStyle(
+            fontSize: 16,
+            color: view.incognito
+                ? BrowserColors.incognito.omniboxText
+                : colors.omniboxText,
+            shadows: const [],
           ),
-          contentPadding: const EdgeInsets.symmetric(vertical: 18),
+          decoration: InputDecoration(
+            filled: false,
+            prefixIcon: Padding(
+              padding: const EdgeInsetsDirectional.only(start: 8),
+              child: Icon(Icons.search, color: scheme.onSurfaceVariant),
+            ),
+            hintText: engine == null
+                ? 'Search or type a URL'
+                : 'Search ${engine.name} or type a URL',
+            hintStyle: TextStyle(
+              color: scheme.onSurfaceVariant,
+              shadows: const [],
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(28),
+              borderSide: BorderSide.none,
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(28),
+              borderSide: BorderSide(color: scheme.primary, width: 2),
+            ),
+            contentPadding: const EdgeInsets.symmetric(vertical: 18),
+          ),
+          onSubmitted: (text) {
+            if (text.trim().isEmpty) return;
+            view.load(
+              resolveInput(text, searchTemplate: settings.searchTemplate),
+            );
+          },
         ),
-        onSubmitted: (text) {
-          if (text.trim().isEmpty) return;
-          view.load(
-            resolveInput(text, searchTemplate: settings.searchTemplate),
-          );
-        },
       ),
     );
   }
@@ -337,13 +427,13 @@ class _TileFace extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final colors = BrowserColors.of(context);
     return Container(
       width: _tileWidth,
       padding: const EdgeInsets.fromLTRB(8, 12, 8, 8),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
-        color: hover ? scheme.onSurface.withValues(alpha: 0.06) : null,
+        color: hover ? colors.ntpText.withValues(alpha: 0.08) : null,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -353,8 +443,8 @@ class _TileFace extends StatelessWidget {
             height: 56,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(14),
+              color: colors.omnibox,
+              shape: BoxShape.circle,
             ),
             child: SiteIcon(url: tile.url, title: tile.title),
           ),

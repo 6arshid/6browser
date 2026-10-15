@@ -8,16 +8,32 @@ import '../features/downloads/downloads_page.dart';
 import '../features/history/history_page.dart';
 import '../features/import/import_page.dart';
 import '../features/settings/app_settings.dart';
+import '../features/settings/appearance_settings.dart';
 import '../features/settings/settings_page.dart';
 import '../features/tabs/tabs_controller.dart';
 import '../features/tabs/url_input.dart';
+import '../features/themes/theme_service.dart';
+import 'browser_theme.dart';
+import 'favicon.dart';
 import 'tab_strip.dart';
 
 /// Below this width the toolbar collapses secondary actions into a menu and
 /// the tab strip becomes a tab-count button.
 const compactBreakpoint = 720.0;
 
-/// Navigation buttons + address bar for the active tab.
+/// Opens a full-window page (history, settings, ...) above the browser.
+void openPage(BuildContext context, Widget page) =>
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
+
+/// Shows or hides the bookmarks bar on every page.
+void toggleBookmarksBar(WidgetRef ref) => ref
+    .read(databaseProvider)
+    .setSetting(
+      'bookmarksBar',
+      '${!ref.read(appSettingsProvider).showBookmarksBar}',
+    );
+
+/// Navigation buttons, address bar and the main menu for the active tab.
 class BrowserToolbar extends ConsumerStatefulWidget {
   const BrowserToolbar({super.key, required this.addressFocus});
 
@@ -32,10 +48,23 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
   BrowserView? _bound;
 
   @override
+  void initState() {
+    super.initState();
+    // Repaint the omnibox outline when it gains or loses focus.
+    widget.addressFocus.addListener(_onFocus);
+  }
+
+  @override
   void dispose() {
+    widget.addressFocus.removeListener(_onFocus);
     _bound?.url.removeListener(_syncAddress);
     _address.dispose();
     super.dispose();
+  }
+
+  void _onFocus() {
+    if (!widget.addressFocus.hasFocus) _syncAddress();
+    setState(() {});
   }
 
   /// Follows the active tab's URL without clobbering what the user types.
@@ -56,81 +85,188 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
     }
   }
 
-  void _open(Widget page) =>
-      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
-
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(tabsProvider);
-    final ctl = ref.read(tabsProvider.notifier);
     final settings = ref.watch(appSettingsProvider);
-    final db = ref.read(databaseProvider);
     final view = state.active?.view;
     _bind(view);
     final compact = MediaQuery.sizeOf(context).width < compactBreakpoint;
+    final colors = BrowserColors.of(context);
 
     void go(String text) {
       view?.load(resolveInput(text, searchTemplate: settings.searchTemplate));
       widget.addressFocus.unfocus();
     }
 
-    final back = IconButton(
-      tooltip: 'Back',
-      icon: const Icon(Icons.arrow_back),
-      onPressed: view?.goBack,
-    );
-    final forward = IconButton(
-      tooltip: 'Forward',
-      icon: const Icon(Icons.arrow_forward),
-      onPressed: view?.goForward,
-    );
-    final reload = IconButton(
-      tooltip: 'Reload',
-      icon: const Icon(Icons.refresh),
-      onPressed: view?.reload,
-    );
-    final home = IconButton(
-      tooltip: 'Home',
-      icon: const Icon(Icons.home_outlined),
-      onPressed: view == null ? null : () => view.load(settings.homeUrl),
-    );
+    Widget button(String tooltip, IconData icon, VoidCallback? onPressed) =>
+        IconButton(
+          tooltip: tooltip,
+          iconSize: 20,
+          color: colors.icon,
+          disabledColor: colors.icon.withValues(alpha: 0.38),
+          icon: Icon(icon),
+          onPressed: onPressed,
+        );
 
-    final field = Expanded(
-      child: SizedBox(
-        height: 40,
+    final reload = view == null
+        ? button('Reload', Icons.refresh, null)
+        : ValueListenableBuilder<bool>(
+            valueListenable: view.isLoading,
+            builder: (_, loading, _) => loading && view.supportsStop
+                ? button('Stop loading', Icons.close, view.stop)
+                : button('Reload (F5)', Icons.refresh, view.reload),
+          );
+
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.toolbar,
+        image: colors.toolbarImage == null
+            ? null
+            : DecorationImage(
+                image: colors.toolbarImage!,
+                alignment: Alignment.topLeft,
+                repeat: ImageRepeat.repeat,
+                fit: BoxFit.none,
+              ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(6, 5, 6, 5),
+            child: Row(
+              children: [
+                button('Back', Icons.arrow_back, view?.goBack),
+                if (!compact)
+                  button('Forward', Icons.arrow_forward, view?.goForward),
+                reload,
+                if (!compact)
+                  button(
+                    'Home',
+                    Icons.home_outlined,
+                    view == null ? null : () => view.load(settings.homeUrl),
+                  ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: _Omnibox(
+                    controller: _address,
+                    focus: widget.addressFocus,
+                    view: view,
+                    onGo: go,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                if (view != null)
+                  ValueListenableBuilder<String>(
+                    valueListenable: view.url,
+                    builder: (_, url, _) => switch (webStoreItemId(url)) {
+                      final id? => Padding(
+                        padding: const EdgeInsets.only(right: 4),
+                        child: FilledButton.icon(
+                          icon: const Icon(Icons.palette_outlined, size: 18),
+                          label: Text(compact ? 'Install' : 'Install theme'),
+                          onPressed: () => runThemeInstall(
+                            context,
+                            ref,
+                            (s) => s.installFromWebStore(id),
+                          ),
+                        ),
+                      ),
+                      null => const SizedBox.shrink(),
+                    },
+                  ),
+                if (compact) _TabCountButton(count: state.tabs.length),
+                _MainMenu(view: view, compact: compact),
+              ],
+            ),
+          ),
+          SizedBox(
+            height: 2,
+            child: view == null
+                ? null
+                : ValueListenableBuilder<bool>(
+                    valueListenable: view.isLoading,
+                    builder: (_, loading, _) => loading
+                        ? LinearProgressIndicator(
+                            minHeight: 2,
+                            backgroundColor: Colors.transparent,
+                          )
+                        : ColoredBox(color: colors.separator),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The address bar: site security chip, input, suggestions and the star.
+class _Omnibox extends ConsumerWidget {
+  const _Omnibox({
+    required this.controller,
+    required this.focus,
+    required this.view,
+    required this.onGo,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focus;
+  final BrowserView? view;
+  final ValueChanged<String> onGo;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final db = ref.read(databaseProvider);
+    final colors = BrowserColors.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final focused = focus.hasFocus;
+    final view = this.view;
+
+    return LayoutBuilder(
+      builder: (context, box) => SizedBox(
+        height: 36,
         child: RawAutocomplete<String>(
-          textEditingController: _address,
-          focusNode: widget.addressFocus,
+          textEditingController: controller,
+          focusNode: focus,
           optionsBuilder: (value) async {
-            if (!widget.addressFocus.hasFocus) return const [];
+            if (!focus.hasFocus || value.text.trim().isEmpty) return const [];
             return db.suggest(value.text);
           },
-          onSelected: go,
+          onSelected: onGo,
           fieldViewBuilder: (context, controller, focus, _) => TextField(
             controller: controller,
             focusNode: focus,
+            style: TextStyle(fontSize: 14, color: colors.omniboxText),
+            cursorColor: scheme.primary,
             decoration: InputDecoration(
               isDense: true,
               filled: true,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(20),
+              fillColor: focused ? colors.toolbar : colors.omnibox,
+              hoverColor: colors.omniboxText.withValues(alpha: 0.04),
+              contentPadding: const EdgeInsets.symmetric(vertical: 10),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
                 borderSide: BorderSide.none,
               ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: BorderSide(color: scheme.primary, width: 2),
+              ),
               hintText: view?.incognito == true
-                  ? 'Incognito: search or enter address'
-                  : 'Search or enter address',
+                  ? 'Search privately or type a URL'
+                  : 'Search Google or type a URL',
+              hintStyle: TextStyle(
+                fontSize: 14,
+                color: colors.omniboxText.withValues(alpha: 0.6),
+              ),
+              prefixIconConstraints: const BoxConstraints(minWidth: 40),
               prefixIcon: view == null
                   ? null
                   : ValueListenableBuilder<String>(
                       valueListenable: view.url,
-                      builder: (_, url, _) => Icon(
-                        isNewTabUrl(url)
-                            ? Icons.search
-                            : isSecureUrl(url)
-                            ? Icons.lock_outline
-                            : Icons.info_outline,
-                        size: 18,
-                      ),
+                      builder: (_, url, _) =>
+                          _SiteChip(url: url, color: colors.omniboxText),
                     ),
               suffixIcon: view == null ? null : _BookmarkStar(view: view),
             ),
@@ -138,34 +274,33 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
               baseOffset: 0,
               extentOffset: controller.text.length,
             ),
-            onSubmitted: go,
+            onSubmitted: onGo,
           ),
           optionsViewBuilder: (context, onSelected, options) => Align(
             alignment: Alignment.topLeft,
-            child: Material(
-              elevation: 4,
-              borderRadius: BorderRadius.circular(8),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(
-                  maxHeight: 280,
-                  maxWidth: 600,
-                ),
-                child: ListView(
-                  padding: EdgeInsets.zero,
-                  shrinkWrap: true,
-                  children: [
-                    for (final o in options)
-                      ListTile(
-                        dense: true,
-                        leading: const Icon(Icons.history, size: 18),
-                        title: Text(
-                          o,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Material(
+                elevation: 6,
+                borderRadius: BorderRadius.circular(12),
+                clipBehavior: Clip.antiAlias,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: 320,
+                    maxWidth: box.maxWidth,
+                  ),
+                  child: ListView(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    shrinkWrap: true,
+                    children: [
+                      for (final (i, o) in options.indexed)
+                        _Suggestion(
+                          index: i,
+                          text: o,
+                          onTap: () => onSelected(o),
                         ),
-                        onTap: () => onSelected(o),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -173,75 +308,99 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
         ),
       ),
     );
+  }
+}
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      child: Row(
-        children: [
-          back,
-          if (!compact) forward,
-          reload,
-          if (!compact) home,
-          const SizedBox(width: 4),
-          field,
-          const SizedBox(width: 4),
-          if (compact) _TabCountButton(count: state.tabs.length),
-          PopupMenuButton<String>(
-            tooltip: 'Menu',
-            onSelected: (v) {
-              switch (v) {
-                case 'new':
-                  ctl.newTab();
-                case 'incognito':
-                  ctl.newIncognitoTab();
-                case 'forward':
-                  view?.goForward();
-                case 'home':
-                  view?.load(settings.homeUrl);
-                case 'devtools':
-                  view?.openDevTools();
-                case 'bookmarks':
-                  _open(const BookmarksPage());
-                case 'history':
-                  _open(const HistoryPage());
-                case 'downloads':
-                  _open(const DownloadsPage());
-                case 'settings':
-                  _open(const SettingsPage());
-                case 'import':
-                  _open(const ImportPage());
-              }
-            },
-            itemBuilder: (_) => [
-              if (compact) ...const [
-                PopupMenuItem(value: 'new', child: Text('New tab')),
-                PopupMenuItem(value: 'forward', child: Text('Forward')),
-                PopupMenuItem(value: 'home', child: Text('Home')),
-                PopupMenuDivider(),
-              ],
-              const PopupMenuItem(
-                value: 'incognito',
-                child: Text('New incognito tab (Ctrl+Shift+N)'),
-              ),
-              const PopupMenuDivider(),
-              const PopupMenuItem(value: 'bookmarks', child: Text('Bookmarks')),
-              const PopupMenuItem(value: 'history', child: Text('History')),
-              const PopupMenuItem(value: 'downloads', child: Text('Downloads')),
-              const PopupMenuItem(value: 'settings', child: Text('Settings')),
-              const PopupMenuItem(
-                value: 'import',
-                child: Text('Import from browser…'),
-              ),
-              const PopupMenuDivider(),
-              const PopupMenuItem(
-                value: 'devtools',
-                child: Text('DevTools (F12)'),
+class _Suggestion extends StatelessWidget {
+  const _Suggestion({
+    required this.index,
+    required this.text,
+    required this.onTap,
+  });
+
+  final int index;
+  final String text;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final highlighted = AutocompleteHighlightedOption.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final isUrl = isBookmarkable(text);
+    return Material(
+      color: index == highlighted
+          ? scheme.onSurface.withValues(alpha: 0.08)
+          : Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          child: Row(
+            children: [
+              isUrl
+                  ? Favicon(url: text, color: scheme.onSurfaceVariant)
+                  : Icon(
+                      Icons.history,
+                      size: 16,
+                      color: scheme.onSurfaceVariant,
+                    ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis),
               ),
             ],
           ),
-        ],
+        ),
       ),
     );
+  }
+}
+
+/// Lock for HTTPS, a "Not secure" label for HTTP, a search icon on New Tab.
+class _SiteChip extends StatelessWidget {
+  const _SiteChip({required this.url, required this.color});
+
+  final String url;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    if (isNewTabUrl(url)) {
+      return Icon(Icons.search, size: 18, color: color.withValues(alpha: 0.7));
+    }
+    if (isSecureUrl(url)) {
+      return Tooltip(
+        message: 'Connection is secure',
+        child: Icon(Icons.lock_outline, size: 16, color: color),
+      );
+    }
+    if (url.startsWith('http://')) {
+      final error = Theme.of(context).colorScheme.error;
+      return Tooltip(
+        message: 'Your connection to this site is not secure',
+        child: Padding(
+          padding: const EdgeInsets.only(left: 10, right: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.warning_amber_rounded, size: 16, color: error),
+              const SizedBox(width: 4),
+              Text(
+                'Not secure',
+                style: TextStyle(fontSize: 12.5, color: error),
+              ),
+              const SizedBox(width: 6),
+              Container(
+                width: 1,
+                height: 16,
+                color: color.withValues(alpha: 0.3),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return Icon(Icons.info_outline, size: 16, color: color);
   }
 }
 
@@ -254,19 +413,135 @@ class _BookmarkStar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final db = ref.read(databaseProvider);
+    final colors = BrowserColors.of(context);
     return ValueListenableBuilder<String>(
       valueListenable: view.url,
       builder: (_, url, _) {
         if (!isBookmarkable(url)) return const SizedBox.shrink();
         final on = ref.watch(isBookmarkedProvider(url)).value ?? false;
         return IconButton(
-          tooltip: on ? 'Remove bookmark' : 'Bookmark this page',
-          icon: Icon(on ? Icons.star : Icons.star_border, size: 20),
+          tooltip: on ? 'Remove bookmark' : 'Bookmark this tab',
+          iconSize: 18,
+          color: on
+              ? Theme.of(context).colorScheme.primary
+              : colors.omniboxText,
+          icon: Icon(on ? Icons.star : Icons.star_border),
           onPressed: () => on
               ? db.removeBookmarkByUrl(url)
               : db.addBookmark(url, view.title.value),
         );
       },
+    );
+  }
+}
+
+/// The "⋮" menu, with icons and keyboard shortcuts like Chrome's.
+class _MainMenu extends ConsumerWidget {
+  const _MainMenu({required this.view, required this.compact});
+
+  final BrowserView? view;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ctl = ref.read(tabsProvider.notifier);
+    final settings = ref.watch(appSettingsProvider);
+    final colors = BrowserColors.of(context);
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+
+    PopupMenuItem<String> item(
+      String value,
+      IconData icon,
+      String label, {
+      String? shortcut,
+      bool checked = false,
+    }) => PopupMenuItem(
+      value: value,
+      height: 40,
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: muted),
+          const SizedBox(width: 14),
+          Expanded(child: Text(label)),
+          if (checked) Icon(Icons.check, size: 18, color: muted),
+          if (shortcut != null)
+            Text(shortcut, style: TextStyle(fontSize: 12, color: muted)),
+        ],
+      ),
+    );
+
+    return PopupMenuButton<String>(
+      tooltip: 'Menu',
+      icon: Icon(Icons.more_vert, color: colors.icon, size: 20),
+      constraints: const BoxConstraints(minWidth: 300),
+      position: PopupMenuPosition.under,
+      onSelected: (v) {
+        switch (v) {
+          case 'new':
+            ctl.newTab();
+          case 'incognito':
+            ctl.newIncognitoTab();
+          case 'forward':
+            view?.goForward();
+          case 'home':
+            view?.load(settings.homeUrl);
+          case 'devtools':
+            view?.openDevTools();
+          case 'bookmarks':
+            openPage(context, const BookmarksPage());
+          case 'bar':
+            toggleBookmarksBar(ref);
+          case 'history':
+            openPage(context, const HistoryPage());
+          case 'downloads':
+            openPage(context, const DownloadsPage());
+          case 'customize':
+            showCustomizePanel(context);
+          case 'settings':
+            openPage(context, const SettingsPage());
+          case 'import':
+            openPage(context, const ImportPage());
+        }
+      },
+      itemBuilder: (_) => [
+        item('new', Icons.add, 'New tab', shortcut: 'Ctrl+T'),
+        item(
+          'incognito',
+          Icons.visibility_off_outlined,
+          'New incognito tab',
+          shortcut: 'Ctrl+Shift+N',
+        ),
+        if (compact) ...[
+          item('forward', Icons.arrow_forward, 'Forward'),
+          item('home', Icons.home_outlined, 'Home'),
+        ],
+        const PopupMenuDivider(),
+        item('history', Icons.history, 'History', shortcut: 'Ctrl+H'),
+        item(
+          'downloads',
+          Icons.download_outlined,
+          'Downloads',
+          shortcut: 'Ctrl+J',
+        ),
+        item(
+          'bookmarks',
+          Icons.bookmarks_outlined,
+          'Bookmarks',
+          shortcut: 'Ctrl+Shift+O',
+        ),
+        item(
+          'bar',
+          Icons.bookmark_border,
+          'Show bookmarks bar',
+          checked: settings.showBookmarksBar,
+        ),
+        const PopupMenuDivider(),
+        item('customize', Icons.palette_outlined, 'Customize appearance'),
+        item('import', Icons.move_to_inbox_outlined, 'Import from browser…'),
+        item('settings', Icons.settings_outlined, 'Settings'),
+        const PopupMenuDivider(),
+        item('devtools', Icons.code, 'Developer tools', shortcut: 'F12'),
+      ],
     );
   }
 }
@@ -277,21 +552,28 @@ class _TabCountButton extends ConsumerWidget {
   final int count;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) => IconButton(
-    tooltip: 'Tabs',
-    onPressed: () => showTabSheet(context, ref),
-    icon: Container(
-      width: 24,
-      height: 24,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        border: Border.all(
-          width: 2,
-          color: IconTheme.of(context).color ?? Colors.grey,
+  Widget build(BuildContext context, WidgetRef ref) {
+    final color = BrowserColors.of(context).icon;
+    return IconButton(
+      tooltip: 'Tabs',
+      onPressed: () => showTabSheet(context, ref),
+      icon: Container(
+        width: 22,
+        height: 22,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          border: Border.all(width: 1.8, color: color),
+          borderRadius: BorderRadius.circular(6),
         ),
-        borderRadius: BorderRadius.circular(6),
+        child: Text(
+          '$count',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: color,
+          ),
+        ),
       ),
-      child: Text('$count', style: const TextStyle(fontSize: 12)),
-    ),
-  );
+    );
+  }
 }

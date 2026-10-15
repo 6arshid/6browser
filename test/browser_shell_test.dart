@@ -44,7 +44,7 @@ void main() {
     expect(find.byType(TabStrip), findsOneWidget);
     expect(c.read(tabsProvider).tabs.length, 1);
 
-    await tester.tap(find.byIcon(Icons.add));
+    await tester.tap(find.byTooltip('New tab (Ctrl+T)'));
     await tester.pump();
     expect(c.read(tabsProvider).tabs.length, 2);
     expect(find.byType(TabChip), findsNWidgets(2));
@@ -97,6 +97,7 @@ void main() {
         );
     await tester.pump();
     expect(find.byIcon(Icons.extension_off), findsOneWidget);
+    expect(find.text('Install theme'), findsOneWidget);
     // The old URL's bookmark stream was cancelled; flush drift's timer.
     await tester.pump(const Duration(milliseconds: 10));
   });
