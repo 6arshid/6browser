@@ -20,7 +20,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   void initState() {
     super.initState();
     final s = ref.read(appSettingsProvider);
-    _home = TextEditingController(text: s.homeUrl);
+    _home = TextEditingController(
+      text: s.homeUrl == defaultHomeUrl ? '' : s.homeUrl,
+    );
     _template = TextEditingController(text: s.searchTemplate);
   }
 
@@ -90,7 +92,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           const SizedBox(height: 8),
           TextField(
             controller: _home,
-            decoration: const InputDecoration(border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              hintText: 'Empty: New Tab page',
+            ),
             onSubmitted: (v) => db.setSetting('homeUrl', v.trim()),
           ),
           const SizedBox(height: 24),

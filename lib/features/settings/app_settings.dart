@@ -16,7 +16,8 @@ const searchEngines = [
   SearchEngine('Bing', 'https://www.bing.com/search?q=%s'),
 ];
 
-const defaultHomeUrl = 'https://www.google.com';
+/// The New Tab page (see `newTabUrl`) unless the user picks another page.
+const defaultHomeUrl = 'about:blank';
 
 /// User settings, persisted as string key/values in the database.
 class AppSettings {

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../engine/browser_engine.dart';
 import '../features/tabs/tabs_controller.dart';
 import '../features/tabs/tabs_state.dart';
+import '../features/tabs/url_input.dart';
 
 const _pinnedWidth = 44.0;
 const _minTabWidth = 40.0;
@@ -99,11 +101,13 @@ class TabChip extends ConsumerWidget {
           borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
         ),
         child: ListenableBuilder(
-          listenable: Listenable.merge([tab.view.title, tab.view.isLoading]),
+          listenable: Listenable.merge([
+            tab.view.title,
+            tab.view.url,
+            tab.view.isLoading,
+          ]),
           builder: (context, _) {
-            final title = tab.view.title.value.isEmpty
-                ? 'New tab'
-                : tab.view.title.value;
+            final title = tabTitle(tab.view);
             return LayoutBuilder(
               builder: (context, box) {
                 // Very narrow tabs show only the icon; close stays reachable via
@@ -224,10 +228,13 @@ Future<void> showTabSheet(BuildContext context, WidgetRef ref) {
                                       ? Icons.visibility_off
                                       : Icons.public),
                           ),
-                          title: ValueListenableBuilder<String>(
-                            valueListenable: t.view.title,
-                            builder: (_, title, _) => Text(
-                              title.isEmpty ? 'New tab' : title,
+                          title: ListenableBuilder(
+                            listenable: Listenable.merge([
+                              t.view.title,
+                              t.view.url,
+                            ]),
+                            builder: (_, _) => Text(
+                              tabTitle(t.view),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -252,3 +259,9 @@ Future<void> showTabSheet(BuildContext context, WidgetRef ref) {
     ),
   );
 }
+
+/// Title shown for a tab; blank pages and the New Tab page read "New tab".
+String tabTitle(BrowserView view) =>
+    isNewTabUrl(view.url.value) || view.title.value.isEmpty
+    ? 'New tab'
+    : view.title.value;

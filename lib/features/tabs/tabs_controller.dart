@@ -6,8 +6,8 @@ import '../../engine/browser_engine.dart';
 import '../../engine/cef_engine.dart';
 import '../../data/providers.dart';
 import '../downloads/download_utils.dart';
-import '../settings/app_settings.dart';
 import 'tabs_state.dart';
+import 'url_input.dart';
 
 /// The engine backend. Overridden in tests with a fake.
 final engineProvider = Provider<BrowserEngine>((ref) => CefEngine());
@@ -89,10 +89,11 @@ class TabsController extends Notifier<TabsState> {
     ref.onDispose(sub.cancel);
   }
 
-  /// Opens a tab and (by default) selects it. Returns its id.
+  /// Opens a tab (the New Tab page unless [url] is given) and, by default,
+  /// selects it. Returns its id.
   int newTab({String? url, bool activate = true, bool incognito = false}) {
     final view = _engine.createView(
-      initialUrl: url ?? ref.read(appSettingsProvider).homeUrl,
+      initialUrl: url ?? newTabUrl,
       incognito: incognito,
     );
     _recordHistory(view);
@@ -142,7 +143,7 @@ class TabsController extends Notifier<TabsState> {
     if (i < 0) return;
     final url = state.tabs[i].view.url.value;
     final view = _engine.createView(
-      initialUrl: url.isEmpty ? ref.read(appSettingsProvider).homeUrl : url,
+      initialUrl: url.isEmpty ? newTabUrl : url,
       incognito: state.tabs[i].view.incognito,
     );
     _recordHistory(view);

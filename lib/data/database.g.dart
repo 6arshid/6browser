@@ -1299,6 +1299,455 @@ class DownloadsCompanion extends UpdateCompanion<Download> {
   }
 }
 
+class $ShortcutsTable extends Shortcuts
+    with TableInfo<$ShortcutsTable, Shortcut> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ShortcutsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _urlMeta = const VerificationMeta('url');
+  @override
+  late final GeneratedColumn<String> url = GeneratedColumn<String>(
+    'url',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+  );
+  static const VerificationMeta _titleMeta = const VerificationMeta('title');
+  @override
+  late final GeneratedColumn<String> title = GeneratedColumn<String>(
+    'title',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _positionMeta = const VerificationMeta(
+    'position',
+  );
+  @override
+  late final GeneratedColumn<int> position = GeneratedColumn<int>(
+    'position',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, url, title, position];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'shortcuts';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<Shortcut> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('url')) {
+      context.handle(
+        _urlMeta,
+        url.isAcceptableOrUnknown(data['url']!, _urlMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_urlMeta);
+    }
+    if (data.containsKey('title')) {
+      context.handle(
+        _titleMeta,
+        title.isAcceptableOrUnknown(data['title']!, _titleMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_titleMeta);
+    }
+    if (data.containsKey('position')) {
+      context.handle(
+        _positionMeta,
+        position.isAcceptableOrUnknown(data['position']!, _positionMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_positionMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  Shortcut map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return Shortcut(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      url: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}url'],
+      )!,
+      title: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}title'],
+      )!,
+      position: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}position'],
+      )!,
+    );
+  }
+
+  @override
+  $ShortcutsTable createAlias(String alias) {
+    return $ShortcutsTable(attachedDatabase, alias);
+  }
+}
+
+class Shortcut extends DataClass implements Insertable<Shortcut> {
+  final int id;
+  final String url;
+  final String title;
+  final int position;
+  const Shortcut({
+    required this.id,
+    required this.url,
+    required this.title,
+    required this.position,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['url'] = Variable<String>(url);
+    map['title'] = Variable<String>(title);
+    map['position'] = Variable<int>(position);
+    return map;
+  }
+
+  ShortcutsCompanion toCompanion(bool nullToAbsent) {
+    return ShortcutsCompanion(
+      id: Value(id),
+      url: Value(url),
+      title: Value(title),
+      position: Value(position),
+    );
+  }
+
+  factory Shortcut.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return Shortcut(
+      id: serializer.fromJson<int>(json['id']),
+      url: serializer.fromJson<String>(json['url']),
+      title: serializer.fromJson<String>(json['title']),
+      position: serializer.fromJson<int>(json['position']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'url': serializer.toJson<String>(url),
+      'title': serializer.toJson<String>(title),
+      'position': serializer.toJson<int>(position),
+    };
+  }
+
+  Shortcut copyWith({int? id, String? url, String? title, int? position}) =>
+      Shortcut(
+        id: id ?? this.id,
+        url: url ?? this.url,
+        title: title ?? this.title,
+        position: position ?? this.position,
+      );
+  Shortcut copyWithCompanion(ShortcutsCompanion data) {
+    return Shortcut(
+      id: data.id.present ? data.id.value : this.id,
+      url: data.url.present ? data.url.value : this.url,
+      title: data.title.present ? data.title.value : this.title,
+      position: data.position.present ? data.position.value : this.position,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('Shortcut(')
+          ..write('id: $id, ')
+          ..write('url: $url, ')
+          ..write('title: $title, ')
+          ..write('position: $position')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, url, title, position);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is Shortcut &&
+          other.id == this.id &&
+          other.url == this.url &&
+          other.title == this.title &&
+          other.position == this.position);
+}
+
+class ShortcutsCompanion extends UpdateCompanion<Shortcut> {
+  final Value<int> id;
+  final Value<String> url;
+  final Value<String> title;
+  final Value<int> position;
+  const ShortcutsCompanion({
+    this.id = const Value.absent(),
+    this.url = const Value.absent(),
+    this.title = const Value.absent(),
+    this.position = const Value.absent(),
+  });
+  ShortcutsCompanion.insert({
+    this.id = const Value.absent(),
+    required String url,
+    required String title,
+    required int position,
+  }) : url = Value(url),
+       title = Value(title),
+       position = Value(position);
+  static Insertable<Shortcut> custom({
+    Expression<int>? id,
+    Expression<String>? url,
+    Expression<String>? title,
+    Expression<int>? position,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (url != null) 'url': url,
+      if (title != null) 'title': title,
+      if (position != null) 'position': position,
+    });
+  }
+
+  ShortcutsCompanion copyWith({
+    Value<int>? id,
+    Value<String>? url,
+    Value<String>? title,
+    Value<int>? position,
+  }) {
+    return ShortcutsCompanion(
+      id: id ?? this.id,
+      url: url ?? this.url,
+      title: title ?? this.title,
+      position: position ?? this.position,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (url.present) {
+      map['url'] = Variable<String>(url.value);
+    }
+    if (title.present) {
+      map['title'] = Variable<String>(title.value);
+    }
+    if (position.present) {
+      map['position'] = Variable<int>(position.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ShortcutsCompanion(')
+          ..write('id: $id, ')
+          ..write('url: $url, ')
+          ..write('title: $title, ')
+          ..write('position: $position')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $HiddenSitesTable extends HiddenSites
+    with TableInfo<$HiddenSitesTable, HiddenSite> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $HiddenSitesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _urlMeta = const VerificationMeta('url');
+  @override
+  late final GeneratedColumn<String> url = GeneratedColumn<String>(
+    'url',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [url];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'hidden_sites';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<HiddenSite> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('url')) {
+      context.handle(
+        _urlMeta,
+        url.isAcceptableOrUnknown(data['url']!, _urlMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_urlMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {url};
+  @override
+  HiddenSite map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return HiddenSite(
+      url: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}url'],
+      )!,
+    );
+  }
+
+  @override
+  $HiddenSitesTable createAlias(String alias) {
+    return $HiddenSitesTable(attachedDatabase, alias);
+  }
+}
+
+class HiddenSite extends DataClass implements Insertable<HiddenSite> {
+  final String url;
+  const HiddenSite({required this.url});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['url'] = Variable<String>(url);
+    return map;
+  }
+
+  HiddenSitesCompanion toCompanion(bool nullToAbsent) {
+    return HiddenSitesCompanion(url: Value(url));
+  }
+
+  factory HiddenSite.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return HiddenSite(url: serializer.fromJson<String>(json['url']));
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{'url': serializer.toJson<String>(url)};
+  }
+
+  HiddenSite copyWith({String? url}) => HiddenSite(url: url ?? this.url);
+  HiddenSite copyWithCompanion(HiddenSitesCompanion data) {
+    return HiddenSite(url: data.url.present ? data.url.value : this.url);
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('HiddenSite(')
+          ..write('url: $url')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => url.hashCode;
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) || (other is HiddenSite && other.url == this.url);
+}
+
+class HiddenSitesCompanion extends UpdateCompanion<HiddenSite> {
+  final Value<String> url;
+  final Value<int> rowid;
+  const HiddenSitesCompanion({
+    this.url = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  HiddenSitesCompanion.insert({
+    required String url,
+    this.rowid = const Value.absent(),
+  }) : url = Value(url);
+  static Insertable<HiddenSite> custom({
+    Expression<String>? url,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (url != null) 'url': url,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  HiddenSitesCompanion copyWith({Value<String>? url, Value<int>? rowid}) {
+    return HiddenSitesCompanion(
+      url: url ?? this.url,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (url.present) {
+      map['url'] = Variable<String>(url.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('HiddenSitesCompanion(')
+          ..write('url: $url, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -1306,6 +1755,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $HistoryEntriesTable historyEntries = $HistoryEntriesTable(this);
   late final $SettingsTable settings = $SettingsTable(this);
   late final $DownloadsTable downloads = $DownloadsTable(this);
+  late final $ShortcutsTable shortcuts = $ShortcutsTable(this);
+  late final $HiddenSitesTable hiddenSites = $HiddenSitesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -1315,6 +1766,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     historyEntries,
     settings,
     downloads,
+    shortcuts,
+    hiddenSites,
   ];
 }
 
@@ -2070,6 +2523,301 @@ typedef $$DownloadsTableProcessedTableManager =
       Download,
       PrefetchHooks Function()
     >;
+typedef $$ShortcutsTableCreateCompanionBuilder = ShortcutsCompanion Function({
+  Value<int> id,
+  required String url,
+  required String title,
+  required int position,
+});
+typedef $$ShortcutsTableUpdateCompanionBuilder = ShortcutsCompanion Function({
+  Value<int> id,
+  Value<String> url,
+  Value<String> title,
+  Value<int> position,
+});
+
+class $$ShortcutsTableFilterComposer
+    extends Composer<_$AppDatabase, $ShortcutsTable> {
+  $$ShortcutsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get url => $composableBuilder(
+    column: $table.url,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get position => $composableBuilder(
+    column: $table.position,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$ShortcutsTableOrderingComposer
+    extends Composer<_$AppDatabase, $ShortcutsTable> {
+  $$ShortcutsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get url => $composableBuilder(
+    column: $table.url,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get position => $composableBuilder(
+    column: $table.position,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ShortcutsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $ShortcutsTable> {
+  $$ShortcutsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get url =>
+      $composableBuilder(column: $table.url, builder: (column) => column);
+
+  GeneratedColumn<String> get title =>
+      $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<int> get position =>
+      $composableBuilder(column: $table.position, builder: (column) => column);
+}
+
+class $$ShortcutsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $ShortcutsTable,
+          Shortcut,
+          $$ShortcutsTableFilterComposer,
+          $$ShortcutsTableOrderingComposer,
+          $$ShortcutsTableAnnotationComposer,
+          $$ShortcutsTableCreateCompanionBuilder,
+          $$ShortcutsTableUpdateCompanionBuilder,
+          (Shortcut, BaseReferences<_$AppDatabase, $ShortcutsTable, Shortcut>),
+          Shortcut,
+          PrefetchHooks Function()
+        > {
+  $$ShortcutsTableTableManager(_$AppDatabase db, $ShortcutsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ShortcutsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ShortcutsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ShortcutsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<String> url = const Value.absent(),
+                Value<String> title = const Value.absent(),
+                Value<int> position = const Value.absent(),
+              }) => ShortcutsCompanion(
+                id: id,
+                url: url,
+                title: title,
+                position: position,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required String url,
+                required String title,
+                required int position,
+              }) => ShortcutsCompanion.insert(
+                id: id,
+                url: url,
+                title: title,
+                position: position,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$ShortcutsTable, Shortcut>(table),
+                  BaseReferences<_$AppDatabase, $ShortcutsTable, Shortcut>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ShortcutsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $ShortcutsTable,
+      Shortcut,
+      $$ShortcutsTableFilterComposer,
+      $$ShortcutsTableOrderingComposer,
+      $$ShortcutsTableAnnotationComposer,
+      $$ShortcutsTableCreateCompanionBuilder,
+      $$ShortcutsTableUpdateCompanionBuilder,
+      (Shortcut, BaseReferences<_$AppDatabase, $ShortcutsTable, Shortcut>),
+      Shortcut,
+      PrefetchHooks Function()
+    >;
+typedef $$HiddenSitesTableCreateCompanionBuilder =
+    HiddenSitesCompanion Function({required String url, Value<int> rowid});
+typedef $$HiddenSitesTableUpdateCompanionBuilder =
+    HiddenSitesCompanion Function({Value<String> url, Value<int> rowid});
+
+class $$HiddenSitesTableFilterComposer
+    extends Composer<_$AppDatabase, $HiddenSitesTable> {
+  $$HiddenSitesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get url => $composableBuilder(
+    column: $table.url,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$HiddenSitesTableOrderingComposer
+    extends Composer<_$AppDatabase, $HiddenSitesTable> {
+  $$HiddenSitesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get url => $composableBuilder(
+    column: $table.url,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$HiddenSitesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $HiddenSitesTable> {
+  $$HiddenSitesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get url =>
+      $composableBuilder(column: $table.url, builder: (column) => column);
+}
+
+class $$HiddenSitesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $HiddenSitesTable,
+          HiddenSite,
+          $$HiddenSitesTableFilterComposer,
+          $$HiddenSitesTableOrderingComposer,
+          $$HiddenSitesTableAnnotationComposer,
+          $$HiddenSitesTableCreateCompanionBuilder,
+          $$HiddenSitesTableUpdateCompanionBuilder,
+          (
+            HiddenSite,
+            BaseReferences<_$AppDatabase, $HiddenSitesTable, HiddenSite>,
+          ),
+          HiddenSite,
+          PrefetchHooks Function()
+        > {
+  $$HiddenSitesTableTableManager(_$AppDatabase db, $HiddenSitesTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$HiddenSitesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$HiddenSitesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$HiddenSitesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> url = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) => HiddenSitesCompanion(url: url, rowid: rowid),
+          createCompanionCallback: ({
+            required String url,
+            Value<int> rowid = const Value.absent(),
+          }) => HiddenSitesCompanion.insert(url: url, rowid: rowid),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$HiddenSitesTable, HiddenSite>(table),
+                  BaseReferences<_$AppDatabase, $HiddenSitesTable, HiddenSite>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$HiddenSitesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $HiddenSitesTable,
+      HiddenSite,
+      $$HiddenSitesTableFilterComposer,
+      $$HiddenSitesTableOrderingComposer,
+      $$HiddenSitesTableAnnotationComposer,
+      $$HiddenSitesTableCreateCompanionBuilder,
+      $$HiddenSitesTableUpdateCompanionBuilder,
+      (
+        HiddenSite,
+        BaseReferences<_$AppDatabase, $HiddenSitesTable, HiddenSite>,
+      ),
+      HiddenSite,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -2082,4 +2830,8 @@ class $AppDatabaseManager {
       $$SettingsTableTableManager(_db, _db.settings);
   $$DownloadsTableTableManager get downloads =>
       $$DownloadsTableTableManager(_db, _db.downloads);
+  $$ShortcutsTableTableManager get shortcuts =>
+      $$ShortcutsTableTableManager(_db, _db.shortcuts);
+  $$HiddenSitesTableTableManager get hiddenSites =>
+      $$HiddenSitesTableTableManager(_db, _db.hiddenSites);
 }

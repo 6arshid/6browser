@@ -43,12 +43,15 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
     _bound?.url.removeListener(_syncAddress);
     _bound = view;
     view?.url.addListener(_syncAddress);
-    _address.text = view?.url.value ?? '';
+    _address.text = _shown(view?.url.value ?? '');
   }
+
+  /// The New Tab page shows an empty address bar.
+  String _shown(String url) => isNewTabUrl(url) ? '' : url;
 
   void _syncAddress() {
     if (!widget.addressFocus.hasFocus) {
-      _address.text = _bound?.url.value ?? '';
+      _address.text = _shown(_bound?.url.value ?? '');
     }
   }
 
@@ -120,7 +123,9 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
                   : ValueListenableBuilder<String>(
                       valueListenable: view.url,
                       builder: (_, url, _) => Icon(
-                        isSecureUrl(url)
+                        isNewTabUrl(url)
+                            ? Icons.search
+                            : isSecureUrl(url)
                             ? Icons.lock_outline
                             : Icons.info_outline,
                         size: 18,

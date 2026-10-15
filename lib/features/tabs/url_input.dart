@@ -32,3 +32,10 @@ bool isWebStoreUrl(String url) =>
 /// Only real web pages can be bookmarked (not blank/internal pages).
 bool isBookmarkable(String url) =>
     url.startsWith('http://') || url.startsWith('https://');
+
+/// Address of the built-in New Tab page. The engine shows a blank page and
+/// the app draws the New Tab UI on top of it.
+const newTabUrl = 'about:blank';
+
+/// True while a tab shows the New Tab page.
+bool isNewTabUrl(String url) => url.isEmpty || url == newTabUrl;

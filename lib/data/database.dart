@@ -49,7 +49,41 @@ class Downloads extends Table {
   Set<Column> get primaryKey => {id};
 }
 
-@DriftDatabase(tables: [Bookmarks, HistoryEntries, Settings, Downloads])
+/// User-pinned tiles on the New Tab page, in [position] order.
+class Shortcuts extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get url => text().unique()();
+  TextColumn get title => text()();
+  IntColumn get position => integer()();
+}
+
+/// Sites the user removed from the New Tab page; they are no longer offered
+/// as "most visited" tiles.
+class HiddenSites extends Table {
+  TextColumn get url => text()();
+
+  @override
+  Set<Column> get primaryKey => {url};
+}
+
+/// A frequently visited page (aggregated from history).
+class TopSite {
+  const TopSite({required this.url, required this.title, required this.visits});
+  final String url;
+  final String title;
+  final int visits;
+}
+
+@DriftDatabase(
+  tables: [
+    Bookmarks,
+    HistoryEntries,
+    Settings,
+    Downloads,
+    Shortcuts,
+    HiddenSites,
+  ],
+)
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
@@ -66,7 +100,17 @@ class AppDatabase extends _$AppDatabase {
   factory AppDatabase.inMemory() => AppDatabase(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+    onUpgrade: (m, from, to) async {
+      if (from < 2) {
+        await m.createTable(shortcuts);
+        await m.createTable(hiddenSites);
+      }
+    },
+  );
 
   // ---- bookmarks ----
 
@@ -150,6 +194,85 @@ class AppDatabase extends _$AppDatabase {
         if (seen.add(r.url)) r.url,
     ].take(limit).toList();
   }
+
+  /// Pages ordered by visit count (then by last visit), newest title kept.
+  Stream<List<TopSite>> watchTopSites({int limit = 50}) =>
+      customSelect(
+        // SQLite returns the bare `title` column from the row holding MAX().
+        'SELECT url, title, COUNT(*) AS visits, MAX(visited_at) AS last '
+        'FROM history_entries GROUP BY url '
+        'ORDER BY visits DESC, last DESC LIMIT ?',
+        variables: [Variable.withInt(limit)],
+        readsFrom: {historyEntries},
+      ).watch().map(
+        (rows) => [
+          for (final r in rows)
+            TopSite(
+              url: r.read<String>('url'),
+              title: r.read<String>('title'),
+              visits: r.read<int>('visits'),
+            ),
+        ],
+      );
+
+  // ---- new tab shortcuts ----
+
+  Stream<List<Shortcut>> watchShortcuts() => (select(
+    shortcuts,
+  )..orderBy([(s) => OrderingTerm.asc(s.position)])).watch();
+
+  Stream<Set<String>> watchHiddenSites() =>
+      select(hiddenSites).watch().map((r) => {for (final h in r) h.url});
+
+  /// Adds [url] as the last shortcut (or renames it if it already exists)
+  /// and un-hides it.
+  Future<void> addShortcut(String url, String title) => transaction(() async {
+    await (delete(hiddenSites)..where((h) => h.url.equals(url))).go();
+    final existing = await (select(
+      shortcuts,
+    )..where((s) => s.url.equals(url))).getSingleOrNull();
+    if (existing != null) {
+      await (update(shortcuts)..where((s) => s.id.equals(existing.id))).write(
+        ShortcutsCompanion(title: Value(title)),
+      );
+      return;
+    }
+    final last = shortcuts.position.max();
+    final max = await (selectOnly(
+      shortcuts,
+    )..addColumns([last])).map((r) => r.read(last)).getSingle();
+    await into(shortcuts).insert(
+      ShortcutsCompanion.insert(
+        url: url,
+        title: title,
+        position: (max ?? -1) + 1,
+      ),
+    );
+  });
+
+  /// Replaces all shortcuts with [tiles] (url, title) in this order.
+  Future<void> setShortcuts(List<(String, String)> tiles) =>
+      transaction(() async {
+        await delete(shortcuts).go();
+        for (final (i, (url, title)) in tiles.indexed) {
+          await into(shortcuts).insert(
+            ShortcutsCompanion.insert(url: url, title: title, position: i),
+            mode: InsertMode.insertOrIgnore,
+          );
+        }
+      });
+
+  /// Removes [url] from the shortcuts and stops offering it as most visited.
+  Future<void> hideSite(String url) => transaction(() async {
+    await (delete(shortcuts)..where((s) => s.url.equals(url))).go();
+    await into(hiddenSites).insert(
+      HiddenSitesCompanion.insert(url: url),
+      mode: InsertMode.insertOrIgnore,
+    );
+  });
+
+  Future<void> unhideSite(String url) =>
+      (delete(hiddenSites)..where((h) => h.url.equals(url))).go();
 
   // ---- settings ----
 

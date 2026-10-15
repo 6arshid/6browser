@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../features/new_tab/new_tab_page.dart';
 import '../features/tabs/tabs_controller.dart';
 import '../features/tabs/url_input.dart';
 import 'tab_strip.dart';
@@ -88,13 +89,27 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
                             for (final t in state.tabs)
                               KeyedSubtree(
                                 key: ValueKey(t.id),
-                                child: ValueListenableBuilder<bool>(
-                                  valueListenable: t.view.isReady,
-                                  builder: (_, ready, _) => ready
-                                      ? t.view.widget
-                                      : const Center(
-                                          child: CircularProgressIndicator(),
-                                        ),
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    ValueListenableBuilder<bool>(
+                                      valueListenable: t.view.isReady,
+                                      builder: (_, ready, _) => ready
+                                          ? t.view.widget
+                                          : const Center(
+                                              child:
+                                                  CircularProgressIndicator(),
+                                            ),
+                                    ),
+                                    // The New Tab page covers the engine's
+                                    // blank page; the view stays alive below.
+                                    ValueListenableBuilder<String>(
+                                      valueListenable: t.view.url,
+                                      builder: (_, url, _) => isNewTabUrl(url)
+                                          ? NewTabPage(view: t.view)
+                                          : const SizedBox.shrink(),
+                                    ),
+                                  ],
                                 ),
                               ),
                           ],

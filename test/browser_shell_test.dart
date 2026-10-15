@@ -111,7 +111,13 @@ void main() {
     await tester.pump();
     expect(c.read(tabsProvider).tabs.length, 2);
     expect(c.read(tabsProvider).active!.view.incognito, isTrue);
-    expect(find.byIcon(Icons.visibility_off), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(TabStrip),
+        matching: find.byIcon(Icons.visibility_off),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('Ctrl+T and Ctrl+W shortcuts', (tester) async {
