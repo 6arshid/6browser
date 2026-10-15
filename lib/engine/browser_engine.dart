@@ -35,8 +35,35 @@ abstract class BrowserView {
   Future<void> dispose();
 }
 
+/// Progress report for one download.
+class DownloadEvent {
+  const DownloadEvent({
+    required this.id,
+    required this.url,
+    required this.path,
+    required this.receivedBytes,
+    required this.totalBytes,
+    required this.state,
+  });
+
+  final int id;
+  final String url;
+  final String path;
+  final int receivedBytes;
+
+  /// -1 or 0 when the size is unknown.
+  final int totalBytes;
+  final DownloadState state;
+}
+
+enum DownloadState { inProgress, complete, canceled }
+
 /// Process-wide engine lifecycle and factory for [BrowserView]s.
 abstract class BrowserEngine {
+  /// Download progress from any tab. Backends without download support
+  /// return an empty stream.
+  Stream<DownloadEvent> get downloads;
+
   Future<void> initialize();
   BrowserView createView({required String initialUrl});
   Future<void> shutdown();

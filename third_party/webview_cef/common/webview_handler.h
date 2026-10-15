@@ -41,6 +41,7 @@ public CefDisplayHandler,
 public CefLifeSpanHandler,
 public CefFocusHandler,
 public CefLoadHandler,
+public CefDownloadHandler,
 public CefRenderHandler{
 public:
     //Paint callback (software off-screen rendering)
@@ -52,6 +53,8 @@ public:
     //cef message event
     std::function<void(int browserId, std::string url)> onUrlChangedEvent;
     std::function<void(int browserId, std::string title)> onTitleChangedEvent;
+    // 6browser patch: download progress. state: 0 in progress, 1 complete, 2 canceled.
+    std::function<void(int id, std::string url, std::string path, int64_t received, int64_t total, int state)> onDownloadEvent;
     std::function<void(int browserId, int type)>onCursorChangedEvent;
     std::function<void(int browserId, std::string text)> onTooltipEvent;
     std::function<void(int browserId, int level, std::string message, std::string source, int line)>onConsoleMessageEvent;
@@ -76,6 +79,16 @@ public:
         return this;
     }
     virtual CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
+    virtual CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
+
+    // CefDownloadHandler methods (6browser patch):
+    bool OnBeforeDownload(CefRefPtr<CefBrowser> browser,
+                          CefRefPtr<CefDownloadItem> download_item,
+                          const CefString& suggested_name,
+                          CefRefPtr<CefBeforeDownloadCallback> callback) override;
+    void OnDownloadUpdated(CefRefPtr<CefBrowser> browser,
+                           CefRefPtr<CefDownloadItem> download_item,
+                           CefRefPtr<CefDownloadItemCallback> callback) override;
     virtual CefRefPtr<CefRenderHandler> GetRenderHandler() override { return this; }
 
 	bool OnProcessMessageReceived(

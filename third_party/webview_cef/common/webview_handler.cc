@@ -100,6 +100,60 @@ bool WebviewHandler::OnProcessMessageReceived(
     return false;
 }
 
+// ---- 6browser patch: downloads ----
+#include <filesystem>
+#ifdef _WIN32
+#include <shlobj.h>
+#endif
+
+static std::filesystem::path UniquePath(std::filesystem::path p) {
+    std::error_code ec;
+    if (!std::filesystem::exists(p, ec)) return p;
+    const auto stem = p.stem().wstring();
+    const auto ext = p.extension().wstring();
+    for (int i = 1; i < 10000; i++) {
+        auto candidate = p.parent_path() / (stem + L" (" + std::to_wstring(i) + L")" + ext);
+        if (!std::filesystem::exists(candidate, ec)) return candidate;
+    }
+    return p;
+}
+
+bool WebviewHandler::OnBeforeDownload(CefRefPtr<CefBrowser> browser,
+                                      CefRefPtr<CefDownloadItem> download_item,
+                                      const CefString& suggested_name,
+                                      CefRefPtr<CefBeforeDownloadCallback> callback) {
+#ifdef _WIN32
+    PWSTR dir = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Downloads, 0, nullptr, &dir)) && dir) {
+        // Strip any directory part from the server-suggested name.
+        std::filesystem::path name = std::filesystem::path(suggested_name.ToWString()).filename();
+        if (name.empty()) name = L"download";
+        std::filesystem::path target = UniquePath(std::filesystem::path(dir) / name);
+        CoTaskMemFree(dir);
+        callback->Continue(CefString(target.wstring()), false);
+        return true;
+    }
+#endif
+    // Other platforms (not yet handled natively): let CEF ask the user.
+    callback->Continue(CefString(), true);
+    return true;
+}
+
+void WebviewHandler::OnDownloadUpdated(CefRefPtr<CefBrowser> browser,
+                                       CefRefPtr<CefDownloadItem> download_item,
+                                       CefRefPtr<CefDownloadItemCallback> callback) {
+    if (!onDownloadEvent) return;
+    int state = 0;
+    if (download_item->IsComplete()) state = 1;
+    else if (download_item->IsCanceled()) state = 2;
+    onDownloadEvent(static_cast<int>(download_item->GetId()),
+                    download_item->GetURL().ToString(),
+                    download_item->GetFullPath().ToString(),
+                    download_item->GetReceivedBytes(),
+                    download_item->GetTotalBytes(),
+                    state);
+}
+
 void WebviewHandler::OnTitleChange(CefRefPtr<CefBrowser> browser,
                                   const CefString& title) {
     //todo: title change

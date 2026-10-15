@@ -94,3 +94,21 @@ Verified by inspecting the command lines of the running browser6.exe processes.
 `cef_sandbox`, which the Flutter runner does not do. Renderer processes are
 therefore unsandboxed; this must be revisited before any public release.
 When upgrading webview_cef, re-apply the patch (search for `6browser patch`).
+
+## Downloads (step 5)
+
+`webview_cef` 0.6.2 has no download handler, so downloads silently did
+nothing. The vendored copy now has a second patch (`6browser patch` markers in
+`common/webview_handler.{h,cc}`, `common/webview_plugin.cc`,
+`lib/src/webview_manager.dart`): a `CefDownloadHandler` that saves into the
+user's Downloads folder (Windows: `FOLDERID_Downloads`, never overwriting an
+existing file) and reports progress to Dart (`WebviewManager.downloadEvents`).
+
+Verified on Windows by loading a `Content-Disposition: attachment` URL: the file
+was written and the database row reached `complete`.
+
+Limitations:
+- No pause/cancel/resume yet (needs a method-channel call into the native
+  `CefDownloadItemCallback`).
+- Linux/macOS fall back to CEF's own save dialog; untested.
+- Incognito (step 7) must not persist downloads or history.

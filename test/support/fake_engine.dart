@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:browser6/engine/browser_engine.dart';
 import 'package:flutter/widgets.dart';
 
@@ -7,11 +9,11 @@ class FakeView implements BrowserView {
   @override
   final ValueNotifier<String> url;
   @override
-  final title = ValueNotifier('');
+  final ValueNotifier<String> title = ValueNotifier('');
   @override
-  final isLoading = ValueNotifier(false);
+  final ValueNotifier<bool> isLoading = ValueNotifier(false);
   @override
-  final isReady = ValueNotifier(true);
+  final ValueNotifier<bool> isReady = ValueNotifier(true);
   @override
   Widget get widget => const SizedBox();
   @override
@@ -33,6 +35,11 @@ class FakeView implements BrowserView {
 }
 
 class FakeEngine implements BrowserEngine {
+  final downloadController = StreamController<DownloadEvent>.broadcast();
+
+  @override
+  Stream<DownloadEvent> get downloads => downloadController.stream;
+
   @override
   Future<void> initialize() async {}
   @override

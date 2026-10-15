@@ -22,3 +22,7 @@ String resolveInput(
 
 /// True when [url] is served over HTTPS (drives the lock indicator).
 bool isSecureUrl(String url) => url.startsWith('https://');
+
+/// Only real web pages can be bookmarked (not blank/internal pages).
+bool isBookmarkable(String url) =>
+    url.startsWith('http://') || url.startsWith('https://');

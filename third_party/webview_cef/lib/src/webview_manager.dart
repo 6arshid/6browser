@@ -56,6 +56,12 @@ class WebviewManager extends ValueNotifier<bool> {
 
   WebviewManager._internal() : super(false);
 
+  final _downloadEvents = StreamController<Map<String, dynamic>>.broadcast();
+
+  /// 6browser patch: download progress events (id, url, path, received,
+  /// total, state: 0 in progress / 1 complete / 2 canceled).
+  Stream<Map<String, dynamic>> get downloadEvents => _downloadEvents.stream;
+
   Future<void> initialize({String? userAgent}) async {
     _creatingCompleter = Completer<void>();
     try {
@@ -98,6 +104,10 @@ class WebviewManager extends ValueNotifier<bool> {
             ?.listener
             ?.onUrlChanged
             ?.call(call.arguments["url"] as String);
+        return;
+      case "downloadUpdated":
+        // 6browser patch: forwarded download progress from the native handler.
+        _downloadEvents.add(Map<String, dynamic>.from(call.arguments as Map));
         return;
       case "titleChanged":
         int browserId = call.arguments["browserId"] as int;

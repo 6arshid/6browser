@@ -1,3 +1,5 @@
+import 'package:browser6/data/database.dart';
+import 'package:browser6/data/providers.dart';
 import 'package:browser6/features/tabs/tabs_controller.dart';
 import 'package:browser6/ui/browser_shell.dart';
 import 'package:browser6/ui/tab_strip.dart';
@@ -13,9 +15,17 @@ Future<ProviderContainer> pumpShell(WidgetTester tester, Size size) async {
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   final container = ProviderContainer(
-    overrides: [engineProvider.overrideWithValue(FakeEngine())],
+    overrides: [
+      engineProvider.overrideWithValue(FakeEngine()),
+      databaseProvider.overrideWithValue(AppDatabase.inMemory()),
+    ],
   );
-  addTearDown(container.dispose);
+  addTearDown(() async {
+    // Unmount so drift's stream subscriptions cancel, then flush their timers.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(milliseconds: 10));
+    container.dispose();
+  });
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,

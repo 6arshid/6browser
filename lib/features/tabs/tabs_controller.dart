@@ -1,10 +1,13 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/database.dart';
 import '../../engine/browser_engine.dart';
 import '../../engine/cef_engine.dart';
+import '../../data/providers.dart';
+import '../downloads/download_utils.dart';
+import '../settings/app_settings.dart';
 import 'tabs_state.dart';
-
-const homeUrl = 'https://www.google.com';
 
 /// The engine backend. Overridden in tests with a fake.
 final engineProvider = Provider<BrowserEngine>((ref) => CefEngine());
@@ -37,15 +40,40 @@ class TabsController extends Notifier<TabsState> {
   /// Starts the engine and opens the first tab.
   Future<void> start() async {
     await _engine.initialize();
+    _recordDownloads();
     newTab();
   }
 
+  /// Mirrors engine download events into the database.
+  void _recordDownloads() {
+    final started = <int, DateTime>{};
+    final sub = _engine.downloads.listen((e) {
+      final path = e.path;
+      ref
+          .read(databaseProvider)
+          .upsertDownload(
+            DownloadsCompanion(
+              id: Value(e.id),
+              url: Value(e.url),
+              fileName: Value(fileNameOf(path, fallback: e.url)),
+              path: Value(path),
+              receivedBytes: Value(e.receivedBytes),
+              totalBytes: Value(e.totalBytes),
+              state: Value(e.state.name),
+              startedAt: Value(started.putIfAbsent(e.id, DateTime.now)),
+            ),
+          );
+    });
+    ref.onDispose(sub.cancel);
+  }
+
   /// Opens a tab and (by default) selects it. Returns its id.
-  int newTab({String url = homeUrl, bool activate = true}) {
-    final tab = BrowserTab(
-      id: _nextId++,
-      view: _engine.createView(initialUrl: url),
+  int newTab({String? url, bool activate = true}) {
+    final view = _engine.createView(
+      initialUrl: url ?? ref.read(appSettingsProvider).homeUrl,
     );
+    _recordHistory(view);
+    final tab = BrowserTab(id: _nextId++, view: view);
     state = TabsState(
       tabs: [...state.tabs, tab],
       activeId: activate ? tab.id : state.activeId ?? tab.id,
@@ -86,10 +114,11 @@ class TabsController extends Notifier<TabsState> {
     final i = state.tabs.indexWhere((t) => t.id == id);
     if (i < 0) return;
     final url = state.tabs[i].view.url.value;
-    final copy = BrowserTab(
-      id: _nextId++,
-      view: _engine.createView(initialUrl: url.isEmpty ? homeUrl : url),
+    final view = _engine.createView(
+      initialUrl: url.isEmpty ? ref.read(appSettingsProvider).homeUrl : url,
     );
+    _recordHistory(view);
+    final copy = BrowserTab(id: _nextId++, view: view);
     final tabs = [...state.tabs]..insert(i + 1, copy);
     state = TabsState(tabs: _pinnedFirst(tabs), activeId: copy.id);
   }
@@ -109,9 +138,34 @@ class TabsController extends Notifier<TabsState> {
     state = TabsState(tabs: _pinnedFirst(tabs), activeId: state.activeId);
   }
 
+  /// Saves a history entry when a page finishes loading. The title usually
+  /// arrives just after load-end, so wait briefly and read the current one.
+  void _recordHistory(BrowserView view) {
+    var wasLoading = false;
+    String? lastRecorded;
+    view.isLoading.addListener(() {
+      final loading = view.isLoading.value;
+      if (wasLoading && !loading) {
+        Future<void>.delayed(const Duration(milliseconds: 600), () {
+          final url = view.url.value;
+          // Sub-frames and redirects fire extra load-end events for the same
+          // page, so skip a URL that was just recorded for this tab.
+          if (!isRecordableUrl(url) || url == lastRecorded) return;
+          lastRecorded = url;
+          ref.read(databaseProvider).addHistory(url, view.title.value);
+        });
+      }
+      wasLoading = loading;
+    });
+  }
+
   /// Stable partition: pinned tabs first, relative order otherwise kept.
   List<BrowserTab> _pinnedFirst(List<BrowserTab> tabs) => [
     ...tabs.where((t) => t.pinned),
     ...tabs.where((t) => !t.pinned),
   ];
 }
+
+/// Only real web pages go to history (not blank/internal pages).
+bool isRecordableUrl(String url) =>
+    url.startsWith('http://') || url.startsWith('https://');

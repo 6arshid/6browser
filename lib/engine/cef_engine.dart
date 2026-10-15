@@ -12,6 +12,22 @@ class CefEngine implements BrowserEngine {
   Future<void> initialize() => WebviewManager().initialize();
 
   @override
+  Stream<DownloadEvent> get downloads => WebviewManager().downloadEvents.map(
+    (m) => DownloadEvent(
+      id: m['id'] as int,
+      url: m['url'] as String,
+      path: m['path'] as String,
+      receivedBytes: m['received'] as int,
+      totalBytes: m['total'] as int,
+      state: switch (m['state'] as int) {
+        1 => DownloadState.complete,
+        2 => DownloadState.canceled,
+        _ => DownloadState.inProgress,
+      },
+    ),
+  );
+
+  @override
   BrowserView createView({required String initialUrl}) =>
       CefBrowserView(initialUrl);
 

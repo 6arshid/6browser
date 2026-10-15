@@ -140,6 +140,34 @@ namespace webview_cef {
 				}
 			};
 
+			m_handler->onDownloadEvent = [=, this](int id, std::string url, std::string path, int64_t received, int64_t total, int state)
+			{
+				if (m_invokeFunc)
+				{
+					WValue* wId = webview_value_new_int(id);
+					WValue* wUrl = webview_value_new_string(const_cast<char*>(url.c_str()));
+					WValue* wPath = webview_value_new_string(const_cast<char*>(path.c_str()));
+					WValue* wRecv = webview_value_new_int(received);
+					WValue* wTotal = webview_value_new_int(total);
+					WValue* wState = webview_value_new_int(state);
+					WValue* retMap = webview_value_new_map();
+					webview_value_set_string(retMap, "id", wId);
+					webview_value_set_string(retMap, "url", wUrl);
+					webview_value_set_string(retMap, "path", wPath);
+					webview_value_set_string(retMap, "received", wRecv);
+					webview_value_set_string(retMap, "total", wTotal);
+					webview_value_set_string(retMap, "state", wState);
+					m_invokeFunc("downloadUpdated", retMap);
+					webview_value_unref(wId);
+					webview_value_unref(wUrl);
+					webview_value_unref(wPath);
+					webview_value_unref(wRecv);
+					webview_value_unref(wTotal);
+					webview_value_unref(wState);
+					webview_value_unref(retMap);
+				}
+			};
+
 			m_handler->onJavaScriptChannelMessage = [=, this](std::string channelName, std::string message, std::string callbackId, int browserId, std::string frameId)
 			{
 				if (m_invokeFunc)
@@ -257,6 +285,7 @@ namespace webview_cef {
 		m_handler->onConsoleMessageEvent = nullptr;
 		m_handler->onUrlChangedEvent = nullptr;
 		m_handler->onTitleChangedEvent = nullptr;
+		m_handler->onDownloadEvent = nullptr;
 		m_handler->onJavaScriptChannelMessage = nullptr;
 		m_handler->onFocusedNodeChangeMessage = nullptr;
 		m_handler->onImeCompositionRangeChangedMessage = nullptr;
