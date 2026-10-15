@@ -6,6 +6,7 @@ import '../engine/browser_engine.dart';
 import '../features/bookmarks/bookmarks_page.dart';
 import '../features/downloads/downloads_page.dart';
 import '../features/history/history_page.dart';
+import '../features/import/import_page.dart';
 import '../features/settings/app_settings.dart';
 import '../features/settings/settings_page.dart';
 import '../features/tabs/tabs_controller.dart';
@@ -207,6 +208,8 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
                   _open(const DownloadsPage());
                 case 'settings':
                   _open(const SettingsPage());
+                case 'import':
+                  _open(const ImportPage());
               }
             },
             itemBuilder: (_) => [
@@ -225,6 +228,10 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
               const PopupMenuItem(value: 'history', child: Text('History')),
               const PopupMenuItem(value: 'downloads', child: Text('Downloads')),
               const PopupMenuItem(value: 'settings', child: Text('Settings')),
+              const PopupMenuItem(
+                value: 'import',
+                child: Text('Import from browser…'),
+              ),
               const PopupMenuDivider(),
               const PopupMenuItem(
                 value: 'devtools',

@@ -134,6 +134,36 @@ class AppDatabase extends _$AppDatabase {
     mode: InsertMode.insertOrIgnore,
   );
 
+  /// Bulk-inserts bookmarks, ignoring any whose URL already exists. Returns the
+  /// number of new rows actually added. Used by the browser-import feature.
+  Future<int> addBookmarks(List<({String url, String title})> items) async {
+    if (items.isEmpty) return 0;
+    final now = DateTime.now();
+    final existing = <String>{
+      for (final r
+          in await (selectOnly(bookmarks)..addColumns([bookmarks.url])).get())
+        r.read(bookmarks.url)!,
+    };
+    // De-dupe within the incoming batch, too.
+    final fresh = <String, String>{};
+    for (final it in items) {
+      if (it.url.isEmpty || existing.contains(it.url)) continue;
+      fresh.putIfAbsent(it.url, () => it.title);
+    }
+    if (fresh.isEmpty) return 0;
+    await batch((b) {
+      b.insertAll(bookmarks, [
+        for (final e in fresh.entries)
+          BookmarksCompanion.insert(
+            url: e.key,
+            title: e.value.isEmpty ? e.key : e.value,
+            createdAt: now,
+          ),
+      ], mode: InsertMode.insertOrIgnore);
+    });
+    return fresh.length;
+  }
+
   Future<void> removeBookmarkByUrl(String url) =>
       (delete(bookmarks)..where((b) => b.url.equals(url))).go();
 
