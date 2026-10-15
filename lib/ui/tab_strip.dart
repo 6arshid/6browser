@@ -84,9 +84,11 @@ class TabChip extends ConsumerWidget {
         margin: const EdgeInsets.fromLTRB(2, 4, 2, 0),
         padding: const EdgeInsets.symmetric(horizontal: 4),
         decoration: BoxDecoration(
-          color: selected
-              ? scheme.surfaceContainerHighest
-              : scheme.surfaceContainerLow,
+          color: tab.view.incognito
+              ? (selected ? Colors.blueGrey.shade700 : Colors.blueGrey.shade900)
+              : (selected
+                    ? scheme.surfaceContainerHighest
+                    : scheme.surfaceContainerLow),
           borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
         ),
         child: ListenableBuilder(
@@ -113,7 +115,11 @@ class TabChip extends ConsumerWidget {
                       )
                     else
                       Icon(
-                        tab.pinned ? Icons.push_pin : Icons.public,
+                        tab.pinned
+                            ? Icons.push_pin
+                            : (tab.view.incognito
+                                  ? Icons.visibility_off
+                                  : Icons.public),
                         size: 14,
                       ),
                     if (!tab.pinned && !iconOnly) ...[
@@ -205,7 +211,11 @@ Future<void> showTabSheet(BuildContext context, WidgetRef ref) {
                         ListTile(
                           selected: t.id == state.activeId,
                           leading: Icon(
-                            t.pinned ? Icons.push_pin : Icons.public,
+                            t.pinned
+                                ? Icons.push_pin
+                                : (t.view.incognito
+                                      ? Icons.visibility_off
+                                      : Icons.public),
                           ),
                           title: ValueListenableBuilder<String>(
                             valueListenable: t.view.title,

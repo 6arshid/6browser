@@ -19,6 +19,7 @@ class CefEngine implements BrowserEngine {
       path: m['path'] as String,
       receivedBytes: m['received'] as int,
       totalBytes: m['total'] as int,
+      incognito: (m['incognito'] as int?) == 1,
       state: switch (m['state'] as int) {
         1 => DownloadState.complete,
         2 => DownloadState.canceled,
@@ -28,15 +29,17 @@ class CefEngine implements BrowserEngine {
   );
 
   @override
-  BrowserView createView({required String initialUrl}) =>
-      CefBrowserView(initialUrl);
+  BrowserView createView({
+    required String initialUrl,
+    bool incognito = false,
+  }) => CefBrowserView(initialUrl, incognito: incognito);
 
   @override
   Future<void> shutdown() => WebviewManager().quit();
 }
 
 class CefBrowserView implements BrowserView {
-  CefBrowserView(String initialUrl) {
+  CefBrowserView(String initialUrl, {this.incognito = false}) {
     _controller = WebviewManager().createWebView(
       loading: const Center(child: CircularProgressIndicator()),
     );
@@ -49,9 +52,12 @@ class CefBrowserView implements BrowserView {
       ),
     );
     _url.value = initialUrl;
-    _controller.initialize(initialUrl);
+    _controller.initialize(initialUrl, incognito: incognito);
     _controller.addListener(() => _isReady.value = _controller.value);
   }
+
+  @override
+  final bool incognito;
 
   late final WebViewController _controller;
   final _url = ValueNotifier<String>('');

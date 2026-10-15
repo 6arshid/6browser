@@ -112,7 +112,9 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
                 borderRadius: BorderRadius.circular(20),
                 borderSide: BorderSide.none,
               ),
-              hintText: 'Search or enter address',
+              hintText: view?.incognito == true
+                  ? 'Incognito: search or enter address'
+                  : 'Search or enter address',
               prefixIcon: view == null
                   ? null
                   : ValueListenableBuilder<String>(
@@ -184,6 +186,8 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
               switch (v) {
                 case 'new':
                   ctl.newTab();
+                case 'incognito':
+                  ctl.newIncognitoTab();
                 case 'forward':
                   view?.goForward();
                 case 'home':
@@ -207,6 +211,11 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
                 PopupMenuItem(value: 'home', child: Text('Home')),
                 PopupMenuDivider(),
               ],
+              const PopupMenuItem(
+                value: 'incognito',
+                child: Text('New incognito tab (Ctrl+Shift+N)'),
+              ),
+              const PopupMenuDivider(),
               const PopupMenuItem(value: 'bookmarks', child: Text('Bookmarks')),
               const PopupMenuItem(value: 'history', child: Text('History')),
               const PopupMenuItem(value: 'downloads', child: Text('Downloads')),

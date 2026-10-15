@@ -83,6 +83,19 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('Ctrl+Shift+N opens an incognito tab', (tester) async {
+    final c = await pumpShell(tester, const Size(1200, 800));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(c.read(tabsProvider).tabs.length, 2);
+    expect(c.read(tabsProvider).active!.view.incognito, isTrue);
+    expect(find.byIcon(Icons.visibility_off), findsOneWidget);
+  });
+
   testWidgets('Ctrl+T and Ctrl+W shortcuts', (tester) async {
     final c = await pumpShell(tester, const Size(1200, 800));
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);

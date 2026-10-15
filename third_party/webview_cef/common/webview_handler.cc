@@ -151,7 +151,8 @@ void WebviewHandler::OnDownloadUpdated(CefRefPtr<CefBrowser> browser,
                     download_item->GetFullPath().ToString(),
                     download_item->GetReceivedBytes(),
                     download_item->GetTotalBytes(),
-                    state);
+                    state,
+                    isIncognito(browser->GetIdentifier()));
 }
 
 void WebviewHandler::OnTitleChange(CefRefPtr<CefBrowser> browser,
@@ -307,13 +308,16 @@ void WebviewHandler::closeBrowser(int browserId)
         it->second.browser = nullptr;
         browser_map_.erase(it);
     }
+    // 6browser patch: drop the incognito session once its last browser is gone.
+    m_incognitoBrowsers.erase(browserId);
+    if (m_incognitoBrowsers.empty()) m_incognitoContext = nullptr;
 }
 
-void WebviewHandler::createBrowser(std::string url, std::function<void(int)> callback)
+void WebviewHandler::createBrowser(std::string url, std::function<void(int)> callback, bool incognito)
 {
 #ifndef OS_MAC
     if(!CefCurrentlyOn(TID_UI)) {
-		CefPostTask(TID_UI, base::BindOnce(&WebviewHandler::createBrowser, this, url, callback));
+		CefPostTask(TID_UI, base::BindOnce(&WebviewHandler::createBrowser, this, url, callback, incognito));
 		return;
 	}
 #endif
@@ -335,7 +339,17 @@ void WebviewHandler::createBrowser(std::string url, std::function<void(int)> cal
     // an IDXGIOutput vblank wait, macOS from a CVDisplayLink.
     window_info.external_begin_frame_enabled = true;
 #endif
-    callback(CefBrowserHost::CreateBrowserSync(window_info, this, url, browser_settings, nullptr, nullptr)->GetIdentifier());
+    CefRefPtr<CefRequestContext> request_context;  // null = the default (persistent) profile
+    if (incognito) {
+        if (!m_incognitoContext) {
+            // Empty cache_path = in-memory context: nothing is written to disk.
+            m_incognitoContext = CefRequestContext::CreateContext(CefRequestContextSettings(), nullptr);
+        }
+        request_context = m_incognitoContext;
+    }
+    auto created = CefBrowserHost::CreateBrowserSync(window_info, this, url, browser_settings, nullptr, request_context);
+    if (incognito) m_incognitoBrowsers.insert(created->GetIdentifier());
+    callback(created->GetIdentifier());
 #ifdef WEBVIEW_CEF_GPU_TEXTURE
     // The GPU shared-texture path is the only render path on this build (no
     // OnPaint fallback). If no accelerated frame arrives shortly, the GPU

@@ -9,6 +9,10 @@
 #include <thread>
 #include <iostream>
 #include <unordered_map>
+#include <filesystem>
+#ifdef _WIN32
+#include <shlobj.h>
+#endif
 
 namespace webview_cef {
 	CefMainArgs mainArgs;
@@ -140,7 +144,7 @@ namespace webview_cef {
 				}
 			};
 
-			m_handler->onDownloadEvent = [=, this](int id, std::string url, std::string path, int64_t received, int64_t total, int state)
+			m_handler->onDownloadEvent = [=, this](int id, std::string url, std::string path, int64_t received, int64_t total, int state, bool incognito)
 			{
 				if (m_invokeFunc)
 				{
@@ -150,6 +154,7 @@ namespace webview_cef {
 					WValue* wRecv = webview_value_new_int(received);
 					WValue* wTotal = webview_value_new_int(total);
 					WValue* wState = webview_value_new_int(state);
+					WValue* wIncognito = webview_value_new_int(incognito ? 1 : 0);
 					WValue* retMap = webview_value_new_map();
 					webview_value_set_string(retMap, "id", wId);
 					webview_value_set_string(retMap, "url", wUrl);
@@ -157,6 +162,7 @@ namespace webview_cef {
 					webview_value_set_string(retMap, "received", wRecv);
 					webview_value_set_string(retMap, "total", wTotal);
 					webview_value_set_string(retMap, "state", wState);
+					webview_value_set_string(retMap, "incognito", wIncognito);
 					m_invokeFunc("downloadUpdated", retMap);
 					webview_value_unref(wId);
 					webview_value_unref(wUrl);
@@ -164,6 +170,7 @@ namespace webview_cef {
 					webview_value_unref(wRecv);
 					webview_value_unref(wTotal);
 					webview_value_unref(wState);
+					webview_value_unref(wIncognito);
 					webview_value_unref(retMap);
 				}
 			};
@@ -309,8 +316,9 @@ namespace webview_cef {
 			stopCEF();
 			result(1, nullptr);
 		}
-		else if (name.compare("create") == 0) {
+		else if (name.compare("create") == 0 || name.compare("createIncognito") == 0) {
 			std::string url = webview_value_get_string(values);
+			const bool incognito = name.compare("createIncognito") == 0;
 			m_handler->createBrowser(url, [=, this](int browserId) {
 				std::shared_ptr<WebviewTexture> renderer = m_createTextureFunc();
 				m_renderers[browserId] = renderer;
@@ -319,7 +327,7 @@ namespace webview_cef {
 				webview_value_append(response, webview_value_new_int(renderer->textureId));
 				result(1, response);
 				webview_value_unref(response);
-			});
+			}, incognito);
 		}
 		else if (name.compare("close") == 0) {
 			int browserId = int(webview_value_get_int(values));
@@ -728,6 +736,24 @@ namespace webview_cef {
 		CefSettings cefs;
 		cefs.windowless_rendering_enabled = true;
 		cefs.no_sandbox = true;
+#ifdef _WIN32
+		// 6browser patch: persistent profile (cookies, localStorage, cache) in
+		// %APPDATA%/team.whitestudio/browser6/cef_profile. Without cache_path CEF
+		// keeps everything in memory and the user is logged out on every start.
+		{
+			PWSTR roaming = nullptr;
+			if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &roaming)) && roaming) {
+				std::filesystem::path profile = std::filesystem::path(roaming) / L"team.whitestudio" / L"browser6" / L"cef_profile";
+				CoTaskMemFree(roaming);
+				std::error_code ec;
+				std::filesystem::create_directories(profile, ec);
+				if (!ec) {
+					CefString(&cefs.root_cache_path) = profile.wstring();
+					CefString(&cefs.cache_path) = profile.wstring();
+				}
+			}
+		}
+#endif
 		if(!userAgent.empty()){
 			CefString(&cefs.user_agent_product) = userAgent;
 		}

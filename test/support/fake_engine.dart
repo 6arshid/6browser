@@ -4,7 +4,11 @@ import 'package:browser6/engine/browser_engine.dart';
 import 'package:flutter/widgets.dart';
 
 class FakeView implements BrowserView {
-  FakeView(String initial) : url = ValueNotifier(initial);
+  FakeView(String initial, {this.incognito = false})
+    : url = ValueNotifier(initial);
+
+  @override
+  final bool incognito;
   bool disposed = false;
   @override
   final ValueNotifier<String> url;
@@ -43,7 +47,10 @@ class FakeEngine implements BrowserEngine {
   @override
   Future<void> initialize() async {}
   @override
-  BrowserView createView({required String initialUrl}) => FakeView(initialUrl);
+  BrowserView createView({
+    required String initialUrl,
+    bool incognito = false,
+  }) => FakeView(initialUrl, incognito: incognito);
   @override
   Future<void> shutdown() async {}
 }

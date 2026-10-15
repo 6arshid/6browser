@@ -9,6 +9,7 @@
 
 #include <functional>
 #include <list>
+#include <set>
 #include <unordered_map>
 
 #include "webview_cookieVisitor.h"
@@ -54,7 +55,7 @@ public:
     std::function<void(int browserId, std::string url)> onUrlChangedEvent;
     std::function<void(int browserId, std::string title)> onTitleChangedEvent;
     // 6browser patch: download progress. state: 0 in progress, 1 complete, 2 canceled.
-    std::function<void(int id, std::string url, std::string path, int64_t received, int64_t total, int state)> onDownloadEvent;
+    std::function<void(int id, std::string url, std::string path, int64_t received, int64_t total, int state, bool incognito)> onDownloadEvent;
     std::function<void(int browserId, int type)>onCursorChangedEvent;
     std::function<void(int browserId, std::string text)> onTooltipEvent;
     std::function<void(int browserId, int level, std::string message, std::string source, int line)>onConsoleMessageEvent;
@@ -166,7 +167,11 @@ public:
     void CloseAllBrowsers(bool force_close);
 
     void closeBrowser(int browserId);
-    void createBrowser(std::string url, std::function<void(int)> callback);
+    // 6browser patch: |incognito| browsers share one in-memory request context
+    // (no cookies/cache/localStorage touch the disk) that is discarded when the
+    // last incognito browser closes.
+    void createBrowser(std::string url, std::function<void(int)> callback, bool incognito = false);
+    bool isIncognito(int browserId) const { return m_incognitoBrowsers.count(browserId) > 0; }
 
     // Drives one external BeginFrame for every live browser (GPU path only).
     // Marshals to the CEF UI thread; safe to call from any thread.
@@ -211,6 +216,8 @@ public:
 private:
     // List of existing browser windows. Only accessed on the CEF UI thread.
     std::unordered_map<int, browser_info> browser_map_;
+    std::set<int> m_incognitoBrowsers;
+    CefRefPtr<CefRequestContext> m_incognitoContext;
 
     std::unordered_map<std::string, std::function<void(CefRefPtr<CefValue>)>> js_callbacks_;
 

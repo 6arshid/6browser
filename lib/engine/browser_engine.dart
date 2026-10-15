@@ -22,6 +22,9 @@ abstract class BrowserView {
   /// Widget that renders the page.
   Widget get widget;
 
+  /// True for private tabs: nothing is persisted to disk by the engine.
+  bool get incognito;
+
   Future<void> load(String url);
   Future<void> goBack();
   Future<void> goForward();
@@ -44,6 +47,7 @@ class DownloadEvent {
     required this.receivedBytes,
     required this.totalBytes,
     required this.state,
+    this.incognito = false,
   });
 
   final int id;
@@ -54,6 +58,9 @@ class DownloadEvent {
   /// -1 or 0 when the size is unknown.
   final int totalBytes;
   final DownloadState state;
+
+  /// The download came from a private tab.
+  final bool incognito;
 }
 
 enum DownloadState { inProgress, complete, canceled }
@@ -65,6 +72,6 @@ abstract class BrowserEngine {
   Stream<DownloadEvent> get downloads;
 
   Future<void> initialize();
-  BrowserView createView({required String initialUrl});
+  BrowserView createView({required String initialUrl, bool incognito = false});
   Future<void> shutdown();
 }

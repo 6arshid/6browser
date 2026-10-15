@@ -40,6 +40,11 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
       bindings: {
         const SingleActivator(LogicalKeyboardKey.keyT, control: true):
             ctl.newTab,
+        const SingleActivator(
+          LogicalKeyboardKey.keyN,
+          control: true,
+          shift: true,
+        ): ctl.newIncognitoTab,
         const SingleActivator(LogicalKeyboardKey.keyW, control: true): () {
           final a = state.active;
           if (a != null) ctl.close(a.id);

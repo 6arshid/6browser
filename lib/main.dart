@@ -2,11 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'features/settings/app_settings.dart';
+import 'features/tabs/tabs_controller.dart';
 import 'ui/browser_shell.dart';
 
-void main() {
+void main(List<String> args) {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const ProviderScope(child: SixBrowserApp()));
+  runApp(
+    ProviderScope(
+      overrides: [
+        launchOptionsProvider.overrideWithValue(LaunchOptions.parse(args)),
+      ],
+      child: const SixBrowserApp(),
+    ),
+  );
 }
 
 class SixBrowserApp extends ConsumerWidget {

@@ -59,6 +59,59 @@ void main() {
     });
   });
 
+  group('incognito', () {
+    test('LaunchOptions.parse', () {
+      final o = LaunchOptions.parse(['--incognito', 'https://a.com']);
+      expect(o.incognito, isTrue);
+      expect(o.url, 'https://a.com');
+      final d = LaunchOptions.parse([]);
+      expect(d.incognito, isFalse);
+      expect(d.url, isNull);
+    });
+
+    test('newIncognitoTab creates a private tab and selects it', () {
+      final id = ctl().newIncognitoTab();
+      final s = c.read(tabsProvider);
+      expect(s.activeId, id);
+      expect(s.active!.view.incognito, isTrue);
+      expect(s.tabs.first.view.incognito, isFalse);
+    });
+
+    test('duplicating a private tab stays private', () {
+      final id = ctl().newIncognitoTab();
+      ctl().duplicate(id);
+      expect(c.read(tabsProvider).active!.view.incognito, isTrue);
+    });
+
+    test('private tabs leave no history', () async {
+      final id = ctl().newIncognitoTab();
+      final v =
+          c.read(tabsProvider).tabs.firstWhere((t) => t.id == id).view
+              as FakeView;
+      v.url.value = 'https://secret.example/';
+      v.isLoading.value = true;
+      v.isLoading.value = false;
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+      expect(await db.watchHistory().first, isEmpty);
+    });
+
+    test('private downloads are not stored', () async {
+      engine.downloadController.add(
+        const DownloadEvent(
+          id: 9,
+          url: 'https://x.com/p.zip',
+          path: 'C:/p.zip',
+          receivedBytes: 1,
+          totalBytes: 1,
+          state: DownloadState.complete,
+          incognito: true,
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(await db.watchDownloads().first, isEmpty);
+    });
+  });
+
   test('download events are stored and updated', () async {
     DownloadEvent event(int got, DownloadState state) => DownloadEvent(
       id: 7,

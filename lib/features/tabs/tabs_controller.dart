@@ -12,6 +12,26 @@ import 'tabs_state.dart';
 /// The engine backend. Overridden in tests with a fake.
 final engineProvider = Provider<BrowserEngine>((ref) => CefEngine());
 
+/// Command-line options the app was started with.
+class LaunchOptions {
+  const LaunchOptions({this.incognito = false, this.url});
+
+  /// Start with a private first tab (`--incognito`).
+  final bool incognito;
+
+  /// Optional URL to open as the first tab (first non-flag argument).
+  final String? url;
+
+  factory LaunchOptions.parse(List<String> args) => LaunchOptions(
+    incognito: args.contains('--incognito'),
+    url: args.where((a) => !a.startsWith('-')).firstOrNull,
+  );
+}
+
+final launchOptionsProvider = Provider<LaunchOptions>(
+  (ref) => const LaunchOptions(),
+);
+
 final tabsProvider = NotifierProvider<TabsController, TabsState>(
   TabsController.new,
 );
@@ -41,13 +61,15 @@ class TabsController extends Notifier<TabsState> {
   Future<void> start() async {
     await _engine.initialize();
     _recordDownloads();
-    newTab();
+    final launch = ref.read(launchOptionsProvider);
+    newTab(url: launch.url, incognito: launch.incognito);
   }
 
   /// Mirrors engine download events into the database.
   void _recordDownloads() {
     final started = <int, DateTime>{};
     final sub = _engine.downloads.listen((e) {
+      if (e.incognito) return; // private downloads are not listed
       final path = e.path;
       ref
           .read(databaseProvider)
@@ -68,9 +90,10 @@ class TabsController extends Notifier<TabsState> {
   }
 
   /// Opens a tab and (by default) selects it. Returns its id.
-  int newTab({String? url, bool activate = true}) {
+  int newTab({String? url, bool activate = true, bool incognito = false}) {
     final view = _engine.createView(
       initialUrl: url ?? ref.read(appSettingsProvider).homeUrl,
+      incognito: incognito,
     );
     _recordHistory(view);
     final tab = BrowserTab(id: _nextId++, view: view);
@@ -80,6 +103,10 @@ class TabsController extends Notifier<TabsState> {
     );
     return tab.id;
   }
+
+  /// Opens a private tab: no history, no persisted cookies/cache/storage and
+  /// no download list entries.
+  int newIncognitoTab() => newTab(incognito: true);
 
   void select(int id) {
     if (state.tabs.any((t) => t.id == id)) {
@@ -116,6 +143,7 @@ class TabsController extends Notifier<TabsState> {
     final url = state.tabs[i].view.url.value;
     final view = _engine.createView(
       initialUrl: url.isEmpty ? ref.read(appSettingsProvider).homeUrl : url,
+      incognito: state.tabs[i].view.incognito,
     );
     _recordHistory(view);
     final copy = BrowserTab(id: _nextId++, view: view);
@@ -147,6 +175,7 @@ class TabsController extends Notifier<TabsState> {
       final loading = view.isLoading.value;
       if (wasLoading && !loading) {
         Future<void>.delayed(const Duration(milliseconds: 600), () {
+          if (view.incognito) return; // private tabs leave no history
           final url = view.url.value;
           // Sub-frames and redirects fire extra load-end events for the same
           // page, so skip a URL that was just recorded for this tab.

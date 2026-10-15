@@ -112,3 +112,25 @@ Limitations:
   `CefDownloadItemCallback`).
 - Linux/macOS fall back to CEF's own save dialog; untested.
 - Incognito (step 7) must not persist downloads or history.
+
+## Profile and incognito (step 7)
+
+Findings and patches in the vendored plugin:
+
+- **No persistent profile upstream.** `webview_cef` never set `cache_path`, so
+  CEF ran fully in memory (cookies/localStorage lost on every start). On
+  Windows `startCEF` now uses `%APPDATA%\team.whitestudio\browser6\cef_profile`
+  as `root_cache_path`/`cache_path`. Linux/macOS are NOT patched yet.
+  Side effect: a second 6browser instance on the same profile exits (CEF
+  singleton lock).
+- **Incognito** = tab-level, not a separate OS window. Private tabs get a shared
+  in-memory `CefRequestContext` (`createIncognito` method); it is dropped when
+  the last private tab closes. Private tabs: no history, no list entry for
+  downloads (the file itself is still saved), nothing written to the profile.
+  Flutter has no stable multi-window support, hence tabs instead of a window.
+- Start private from the command line: `browser6.exe --incognito [url]`.
+
+Verified on Windows with the real app: a cookie with `Max-Age` set in a normal
+tab appeared in `cef_profile\Default\Network\Cookies`; the same cookie set in a
+`--incognito` run did not. (The private run's page load was not observed
+directly.)
