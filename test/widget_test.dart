@@ -1,30 +1,34 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
+import 'package:browser6/features/tabs/url_input.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:browser6/main.dart';
-
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  group('resolveInput', () {
+    test('keeps full URLs', () {
+      expect(resolveInput('https://example.com/a'), 'https://example.com/a');
+    });
+    test('adds https to hosts', () {
+      expect(resolveInput('example.com'), 'https://example.com');
+      expect(resolveInput('localhost:8080/x'), 'https://localhost:8080/x');
+    });
+    test('turns text into a search', () {
+      expect(
+        resolveInput('flutter cef'),
+        'https://www.google.com/search?q=flutter+cef',
+      );
+    });
+    test('empty input is about:blank', () {
+      expect(resolveInput('  '), 'about:blank');
+    });
+    test('custom search template', () {
+      expect(
+        resolveInput('hi there', searchTemplate: 'https://d.com/?q=%s'),
+        'https://d.com/?q=hi+there',
+      );
+    });
+  });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  test('isSecureUrl', () {
+    expect(isSecureUrl('https://a.com'), isTrue);
+    expect(isSecureUrl('http://a.com'), isFalse);
   });
 }

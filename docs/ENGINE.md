@@ -36,3 +36,20 @@ with a realistic chance of full extension support.
   without touching features.
 - Build needs CMake, a C++20 toolchain (Visual Studio C++ workload on Windows)
   and Flutter >= 3.27.
+
+## Findings from the step 3 build (Windows, webview_cef 0.6.2, CEF 149)
+
+- The Windows runner **must** call `initCEFProcesses(instance)` first in
+  `wWinMain` and forward messages with `handleWndProcForCEF`. Without it CEF
+  aborts at start-up (`CefTask_0_CToCpp called with invalid version -1`).
+- The zero-copy GPU texture path failed here (`Could not create external
+  texture`, blank page, with and without Impeller). `windows/CMakeLists.txt`
+  sets `WEBVIEW_CEF_GPU_TEXTURE=OFF` to use the software pixel-buffer path.
+  This costs performance; re-test the GPU path on other machines.
+- `webview_cef` exposes no stop-loading call, so the Stop button is not
+  implemented (`BrowserView.supportsStop == false`).
+- The CEF log shows Chrome's own extension code
+  (`chrome/browser/extensions/external_registry_loader_win.cc`) running, so
+  this CEF build includes some Chrome-layer extension machinery. It is
+  unverified whether extensions can actually be loaded; this goes in the
+  step 6 spike.

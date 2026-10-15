@@ -55,6 +55,10 @@ add_subdirectory("runner")
 
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
+# webview_cef's zero-copy GPU texture path fails on this setup ("Could not
+# create external texture"); use its software pixel-buffer path instead.
+set(WEBVIEW_CEF_GPU_TEXTURE OFF CACHE BOOL "" FORCE)
+
 include(flutter/generated_plugins.cmake)
 
 
