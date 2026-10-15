@@ -1,7 +1,9 @@
 import 'package:drift/drift.dart' show Value;
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/database.dart';
+import '../../engine/android_engine.dart';
 import '../../engine/browser_engine.dart';
 import '../../engine/cef_engine.dart';
 import '../../data/providers.dart';
@@ -9,8 +11,13 @@ import '../downloads/download_utils.dart';
 import 'tabs_state.dart';
 import 'url_input.dart';
 
-/// The engine backend. Overridden in tests with a fake.
-final engineProvider = Provider<BrowserEngine>((ref) => CefEngine());
+/// The engine backend, chosen by platform: the WebView backend on Android,
+/// CEF on desktop. Overridden in tests with a fake.
+final engineProvider = Provider<BrowserEngine>(
+  (ref) => defaultTargetPlatform == TargetPlatform.android
+      ? AndroidEngine()
+      : CefEngine(),
+);
 
 /// Command-line options the app was started with.
 class LaunchOptions {
