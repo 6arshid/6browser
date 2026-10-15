@@ -16,6 +16,7 @@ AppPublisher=team.whitestudio
 DefaultDirName={autopf}\6browser
 DefaultGroupName=6browser
 UninstallDisplayIcon={app}\6browser.exe
+SetupIconFile=..\windows\runner\resources\app_icon.ico
 OutputDir={#OutputDir}
 OutputBaseFilename=6browser-setup
 Compression=lzma2

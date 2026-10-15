@@ -1,37 +1,43 @@
-"""Generates the 6browser logo placeholder (an indigo rounded square with a
-white "6") as assets/logo.png and windows/runner/resources/app_icon.ico.
+"""Generates every app icon from assets/logo_source.png (the 6browser globe
+logo on a transparent background):
+
+  assets/logo.png                                   in-app logo (512px)
+  windows/runner/resources/app_icon.ico             exe / installer icon
+  macos/Runner/Assets.xcassets/AppIcon.appiconset/  macOS app icons
 
 Run: python scripts/make_icon.py
 """
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
-SIZE = 512
-INDIGO = (63, 81, 181, 255)
+SOURCE = ROOT / "assets" / "logo_source.png"
+MAC_DIR = ROOT / "macos" / "Runner" / "Assets.xcassets" / "AppIcon.appiconset"
+MARGIN = 0.04  # transparent padding around the logo, as a fraction of the side
+
+src = Image.open(SOURCE).convert("RGBA")
+
+# Drop faint stray pixels, then crop to the logo itself.
+alpha = src.getchannel("A")
+alpha = alpha.point(lambda v: v if v > 40 else 0)
+src.putalpha(alpha)
+src = src.crop(alpha.getbbox())
+
+# Center on a transparent square canvas.
+side = int(max(src.size) * (1 + 2 * MARGIN))
+square = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+square.paste(src, ((side - src.width) // 2, (side - src.height) // 2), src)
 
 
-def find_font(size):
-    for name in ("arialbd.ttf", "Arial Bold.ttf", "DejaVuSans-Bold.ttf", "segoeuib.ttf"):
-        try:
-            return ImageFont.truetype(name, size)
-        except OSError:
-            continue
-    return ImageFont.load_default()
+def sized(px):
+    return square.resize((px, px), Image.LANCZOS)
 
 
-img = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
-d = ImageDraw.Draw(img)
-d.rounded_rectangle((0, 0, SIZE - 1, SIZE - 1), radius=SIZE // 4, fill=INDIGO)
-font = find_font(int(SIZE * 0.72))
-box = d.textbbox((0, 0), "6", font=font)
-w, h = box[2] - box[0], box[3] - box[1]
-d.text(((SIZE - w) / 2 - box[0], (SIZE - h) / 2 - box[1]), "6", font=font, fill="white")
-
-(ROOT / "assets").mkdir(exist_ok=True)
-img.save(ROOT / "assets" / "logo.png")
-img.save(
+sized(512).save(ROOT / "assets" / "logo.png")
+sized(256).save(
     ROOT / "windows" / "runner" / "resources" / "app_icon.ico",
-    sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+    sizes=[(16, 16), (20, 20), (24, 24), (32, 32), (40, 40), (48, 48), (64, 64), (128, 128), (256, 256)],
 )
-print("wrote assets/logo.png and app_icon.ico")
+for px in (16, 32, 64, 128, 256, 512, 1024):
+    sized(px).save(MAC_DIR / f"app_icon_{px}.png")
+print("wrote assets/logo.png, app_icon.ico and macOS app icons")
