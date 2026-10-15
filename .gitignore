@@ -46,3 +46,7 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Vendored webview_cef: CEF binaries are downloaded at build time
+third_party/webview_cef/third/cef/
+third_party/webview_cef/windows/prebuilt.zip

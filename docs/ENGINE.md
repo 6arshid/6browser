@@ -85,4 +85,12 @@ issue tracker (not yet confirmed by a running experiment):
 This is acceptable for an embedded webview demo, **not for a general-purpose
 browser**. Before 6browser is used on real sites we must patch or fork the
 plugin (e.g. `dependency_overrides` with a vendored copy) to remove them.
-Status: NOT yet fixed.
+Status: **fixed except `no-sandbox`.** webview_cef is vendored in
+`third_party/webview_cef` (pubspec path dependency) and patched in
+`common/webview_app.cc`: `disable-web-security`, `allow-running-insecure-content`,
+the SameSite feature overrides and `ignore-certificate-errors` are removed.
+Verified by inspecting the command lines of the running browser6.exe processes.
+`no-sandbox` remains: CEF's sandbox needs the executable linked against
+`cef_sandbox`, which the Flutter runner does not do. Renderer processes are
+therefore unsandboxed; this must be revisited before any public release.
+When upgrading webview_cef, re-apply the patch (search for `6browser patch`).
