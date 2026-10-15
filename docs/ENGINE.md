@@ -53,3 +53,36 @@ with a realistic chance of full extension support.
   this CEF build includes some Chrome-layer extension machinery. It is
   unverified whether extensions can actually be loaded; this goes in the
   step 6 spike.
+
+## Extension spike results (step 4.5)
+
+Question: can `webview_cef` (option A) run Chrome extensions?
+
+**Answer: no, not with this architecture.** Based on CEF documentation and
+issue tracker (not yet confirmed by a running experiment):
+
+- `webview_cef` creates browsers with `SetAsWindowless` (off-screen
+  rendering). CEF docs state windowless browsers always use the **Alloy**
+  runtime style; Chrome style is only available for windowed browsers
+  (`CefWindowInfo.runtime_style`). Chrome-style OSR is an open feature request
+  (CEF issue #3293).
+- CEF maintainers state extensions are only supported with Chrome-style windows
+  that show part of the Chrome UI (e.g. the toolbar).
+- Therefore MV3 extensions, the extension toolbar/popups and Web Store install
+  cannot work in option A. Not faked in the UI.
+
+## Security findings in webview_cef 0.6.2 (affects option A)
+
+`common/webview_app.cc` unconditionally adds these Chromium switches:
+
+| Switch | Effect |
+|---|---|
+| `disable-web-security` | Disables same-origin policy: any page can read other origins |
+| `allow-running-insecure-content` | Mixed content allowed on HTTPS pages |
+| `no-sandbox` | Renderer sandbox off |
+| `disable-features=SameSiteByDefaultCookies,CookiesWithoutSameSiteMustBeSecure` | Weakens cookie protections |
+
+This is acceptable for an embedded webview demo, **not for a general-purpose
+browser**. Before 6browser is used on real sites we must patch or fork the
+plugin (e.g. `dependency_overrides` with a vendored copy) to remove them.
+Status: NOT yet fixed.
