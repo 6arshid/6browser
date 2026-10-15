@@ -134,3 +134,31 @@ Verified on Windows with the real app: a cookie with `Max-Age` set in a normal
 tab appeared in `cef_profile\Default\Network\Cookies`; the same cookie set in a
 `--incognito` run did not. (The private run's page load was not observed
 directly.)
+
+## Extension spike #2: CEF Chrome style, windowed (2026-10-15)
+
+Setup: CEF 149's own `cefsimple` sample, built from the downloaded distribution
+(outside the repo, `E:\6b_spike`), run with `--use-native` (windowed, Chrome
+style, top-level native window - not yet a child of the Flutter window),
+`--load-extension=<uBOL>,<Dark Reader>`, `--remote-debugging-port`.
+Extensions: uBlock Origin Lite 2026.1012.1545 (MV3) and Dark Reader 4.9.133
+(MV3), official GitHub release zips. Everything checked via the DevTools
+protocol, no desktop input.
+
+| Check | Result |
+|---|---|
+| `--load-extension` (unpacked MV3) | Works: both service workers running |
+| uBOL `declarativeNetRequest` blocking | Works: ad script request blocked, normal request loaded |
+| Dark Reader content scripts | Works: 8 `style.darkreader` tags, light page turned dark |
+| `chrome.tabs.create` | Works (Dark Reader opened its help tab) |
+| Extension popup pages | Render with `chrome.*` APIs when opened as a tab |
+| `chrome://extensions` management page | Works (list, enable/disable, remove, details) |
+| Chrome Web Store | `chrome.webstorePrivate` present, "Add to Chrome" button exists, but the store shows "Switch to Chrome". **Clicking install not tested** (needs a click in Chrome's native confirmation dialog) |
+| Toolbar icons / badge / anchored popups | **Not available**: native mode has no Chrome toolbar, and CEF has no C++ API to list extensions, read badges or open an action popup for our own toolbar |
+| External extensions from the Windows registry | Picked up (McAfee WebAdvisor appeared, disabled). Must be turned off for 6browser |
+
+Conclusion: the extension *engine* works in CEF Chrome style. The open problems
+are (1) the toolbar/popup UI, (2) Web Store install confirmation, (3) hosting
+the windowed browser as a child of the Flutter window, and (4) ignoring other
+programs' registry-installed extensions. These decide whether option B is
+viable for 6browser.
