@@ -75,6 +75,27 @@ void main() {
       expect(tiles.map((t) => t.custom), [true, false]);
     });
 
+    test('the same page or search shows once', () {
+      final tiles = buildTiles(
+        [sc(0, 'https://a.com/')],
+        [
+          top('https://www.google.com/search?q=x+y&ei=1&sxsrf=2', 9),
+          top('https://www.google.com/search?q=x%20y&ei=3', 8),
+          top('https://www.google.dk/search?q=X+y&hl=da', 7),
+          top('http://www.a.com/?utm_source=z#top', 6),
+          top('https://b.com/?id=1', 5),
+          top('https://b.com/?id=2', 4),
+        ],
+        {},
+      );
+      expect(tiles.map((t) => t.url), [
+        'https://a.com/',
+        'https://www.google.com/search?q=x+y&ei=1&sxsrf=2',
+        'https://b.com/?id=1',
+        'https://b.com/?id=2',
+      ]);
+    });
+
     test('normalizeShortcutUrl', () {
       expect(normalizeShortcutUrl('example.com'), 'https://example.com');
       expect(normalizeShortcutUrl(' http://a.b/c '), 'http://a.b/c');
@@ -106,10 +127,7 @@ void main() {
       final undo = await NewTabActions(db, tiles).remove(0);
       expect((await db.watchShortcuts().first).map((s) => s.title), ['B']);
       await undo();
-      expect((await db.watchShortcuts().first).map((s) => s.title), [
-        'A',
-        'B',
-      ]);
+      expect((await db.watchShortcuts().first).map((s) => s.title), ['A', 'B']);
       expect(await db.watchHiddenSites().first, isEmpty);
     });
   });
@@ -175,9 +193,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 10));
     });
 
-    testWidgets('most visited sites appear and can be dragged', (
-      tester,
-    ) async {
+    testWidgets('most visited sites appear and can be dragged', (tester) async {
       final c = await pumpShell(tester, const Size(1200, 800));
       final db = c.read(databaseProvider);
       await tester.runAsync(() async {

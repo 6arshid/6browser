@@ -38,15 +38,90 @@ List<NewTabTile> buildTiles(
     for (final s in shortcuts.take(max))
       NewTabTile(url: s.url, title: s.title, custom: true),
   ];
-  final shown = {for (final t in tiles) t.url};
+  final shown = {for (final t in tiles) tileKey(t.url)};
+  final hiddenKeys = {for (final h in hidden) tileKey(h)};
   for (final s in topSites) {
     if (tiles.length >= max) break;
-    if (hidden.contains(s.url) || isNewTabUrl(s.url) || !shown.add(s.url)) {
+    final key = tileKey(s.url);
+    if (hiddenKeys.contains(key) || isNewTabUrl(s.url) || !shown.add(key)) {
       continue;
     }
     tiles.add(NewTabTile(url: s.url, title: s.title, custom: false));
   }
   return tiles;
+}
+
+/// Query parameters that name a search, by which search pages are told apart.
+const _searchParams = ['q', 'query', 'text', 'wd', 'search_query'];
+
+/// Parameters that only track the visit and never change the page.
+bool _isTracking(String name) =>
+    name.startsWith('utm_') ||
+    const {
+      'ei',
+      'ved',
+      'sxsrf',
+      'oq',
+      'gs_lp',
+      'gs_lcrp',
+      'sclient',
+      'sca_esv',
+      'sca_upv',
+      'source',
+      'sourceid',
+      'ie',
+      'oe',
+      'client',
+      'uact',
+      'iflsig',
+      'bih',
+      'biw',
+      'dpr',
+      'rlz',
+      'aqs',
+      'hl',
+      'gl',
+      'sa',
+      'fbclid',
+      'gclid',
+      'mc_cid',
+      'mc_eid',
+      'ref',
+      'ref_src',
+      'spm',
+      'si',
+      'form',
+      'pc',
+      'cvid',
+    }.contains(name);
+
+/// Same key for URLs that show the same page, so most visited lists each
+/// page once: scheme, `www.`, the fragment, tracking parameters and a
+/// trailing slash are ignored, and a search is known by its terms alone
+/// (google.com and google.dk searching the same words are one tile).
+String tileKey(String url) {
+  final uri = Uri.tryParse(url.trim());
+  if (uri == null || !uri.hasAuthority) return url.trim();
+  var host = uri.host.toLowerCase();
+  if (host.startsWith('www.')) host = host.substring(4);
+  var path = uri.path;
+  if (path.endsWith('/')) path = path.substring(0, path.length - 1);
+  final params = uri.queryParameters;
+  for (final name in _searchParams) {
+    final terms = params[name]?.trim().toLowerCase();
+    if (terms != null && terms.isNotEmpty) {
+      // Country domains (google.dk, google.co.uk) count as one engine.
+      final engine = host
+          .split('.')
+          .firstWhere((part) => part.length > 3, orElse: () => host);
+      return 'search:$engine$path?${terms.split(RegExp(r'\s+')).join(' ')}';
+    }
+  }
+  final kept = [
+    for (final e in params.entries)
+      if (!_isTracking(e.key)) '${e.key}=${e.value}',
+  ]..sort();
+  return '$host$path${kept.isEmpty ? '' : '?${kept.join('&')}'}';
 }
 
 final _shortcuts = StreamProvider<List<Shortcut>>(
