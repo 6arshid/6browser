@@ -1,11 +1,13 @@
 import 'dart:io';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../../data/providers.dart';
+import 'bookmark_file_parser.dart';
 import 'browser_detector.dart';
 import 'import_models.dart';
 import 'import_service.dart';
@@ -57,12 +59,49 @@ class _ImportPageState extends ConsumerState<ImportPage> {
     final added = await _service.importBookmarks(result.bookmarks);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Imported $added new bookmark(s).'),
-        ),
+        SnackBar(content: Text('Imported $added new bookmark(s).')),
       );
     }
   }
+
+  /// Mobile browsers can't be read directly (each app's data is sandboxed),
+  /// so the user exports a bookmarks file there and picks it here.
+  Future<void> _importBookmarksFile() async {
+    // Android/iOS pickers can't filter by extension reliably; exported files
+    // often come through as text/plain or application/octet-stream.
+    final file = await openFile(
+      acceptedTypeGroups: _isMobile
+          ? const []
+          : const [
+              XTypeGroup(
+                label: 'Bookmarks',
+                extensions: ['html', 'htm', 'json'],
+              ),
+              XTypeGroup(label: 'All files'),
+            ],
+    );
+    if (file == null || !mounted) return;
+    setState(() => _busy = true);
+    String message;
+    try {
+      final marks = BookmarkFileParser.parse(await file.readAsString());
+      final added = await _service.importBookmarks(marks);
+      message = marks.isEmpty
+          ? 'No bookmarks found in ${file.name}.'
+          : 'Imported $added new bookmark(s) of ${marks.length} in '
+                '${file.name}.';
+    } on FormatException {
+      message = '${file.name} is not a bookmarks HTML or JSON export.';
+    } catch (e) {
+      message = 'Could not read ${file.name}: $e';
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  static bool get _isMobile => Platform.isAndroid || Platform.isIOS;
 
   Future<void> _exportPasswords() async {
     final logins = _result?.logins ?? const [];
@@ -97,49 +136,104 @@ class _ImportPageState extends ConsumerState<ImportPage> {
     final title = Theme.of(context).textTheme.titleMedium;
     return Scaffold(
       appBar: AppBar(title: const Text('Import from another browser')),
-      body: _profiles.isEmpty
-          ? const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Text(
-                  'No Chrome, Edge, Brave or Firefox profiles were found on '
-                  'this machine.',
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            )
-          : ListView(
-              padding: const EdgeInsets.all(16),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          if (_profiles.isNotEmpty) ...[
+            Text('Source profile', style: title),
+            const SizedBox(height: 8),
+            Row(
               children: [
-                Text('Source profile', style: title),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<BrowserProfile>(
-                        initialValue: _selected,
-                        decoration: const InputDecoration(
-                          border: OutlineInputBorder(),
+                Expanded(
+                  child: DropdownButtonFormField<BrowserProfile>(
+                    initialValue: _selected,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                    ),
+                    items: [
+                      for (final pr in _profiles)
+                        DropdownMenuItem(
+                          value: pr,
+                          child: Text(
+                            pr.label,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                        items: [
-                          for (final pr in _profiles)
-                            DropdownMenuItem(value: pr, child: Text(pr.label)),
-                        ],
-                        onChanged: (v) => setState(() => _selected = v),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    FilledButton(
-                      onPressed: _busy ? null : _scan,
-                      child: const Text('Scan'),
-                    ),
-                  ],
+                    ],
+                    onChanged: (v) => setState(() => _selected = v),
+                  ),
                 ),
-                const SizedBox(height: 24),
-                if (_busy) const Center(child: CircularProgressIndicator()),
-                if (_result != null) ..._results(_result!, title),
+                const SizedBox(width: 12),
+                FilledButton(
+                  onPressed: _busy ? null : _scan,
+                  child: const Text('Scan'),
+                ),
               ],
             ),
+            const SizedBox(height: 24),
+          ] else if (!_isMobile) ...[
+            const Text(
+              'No Chrome, Edge, Brave or Firefox profiles were found on '
+              'this machine.',
+            ),
+            const SizedBox(height: 24),
+          ],
+          _fileImportCard(title),
+          const SizedBox(height: 24),
+          if (_busy) const Center(child: CircularProgressIndicator()),
+          if (_result != null) ..._results(_result!, title),
+        ],
+      ),
+    );
+  }
+
+  Widget _fileImportCard(TextStyle? title) {
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Bookmarks file', style: title),
+            const SizedBox(height: 8),
+            if (_isMobile)
+              Text(
+                "Android and iOS don't let apps read other browsers' data, "
+                'so export your bookmarks first and pick the file here:',
+                style: TextStyle(color: muted),
+              )
+            else
+              Text(
+                'Import a bookmarks.html or Chromium Bookmarks file exported '
+                'from any browser.',
+                style: TextStyle(color: muted),
+              ),
+            if (_isMobile) ...[
+              const SizedBox(height: 8),
+              for (final step in const [
+                'Chrome / Edge / Brave (desktop): Bookmarks manager → ⋮ → '
+                    'Export bookmarks.',
+                'Firefox (desktop): Bookmarks → Manage bookmarks → '
+                    'Import and Backup → Export to HTML.',
+                'Phone-only bookmarks: turn on sync in that browser, then '
+                    'export from its desktop version.',
+              ])
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text('• $step', style: TextStyle(color: muted)),
+                ),
+            ],
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: _busy ? null : _importBookmarksFile,
+              icon: const Icon(Icons.file_open_outlined),
+              label: const Text('Choose bookmarks file'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -186,9 +280,7 @@ class _ImportPageState extends ConsumerState<ImportPage> {
       for (final e in r.extensions)
         ListTile(
           dense: true,
-          leading: Icon(
-            e.enabled ? Icons.extension : Icons.extension_off,
-          ),
+          leading: Icon(e.enabled ? Icons.extension : Icons.extension_off),
           title: Text(e.name),
           subtitle: Text(
             [if (e.version != null) 'v${e.version}', e.id].join(' · '),

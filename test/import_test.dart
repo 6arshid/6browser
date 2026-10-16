@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:browser6/data/database.dart';
 import 'package:browser6/data/providers.dart';
+import 'package:browser6/features/import/bookmark_file_parser.dart';
 import 'package:browser6/features/import/browser_detector.dart';
 import 'package:browser6/features/import/chromium_reader.dart';
 import 'package:browser6/features/import/firefox_reader.dart';
@@ -15,6 +16,65 @@ import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
 void main() {
+  group('BookmarkFileParser', () {
+    test('parses Netscape HTML with nested folders and entities', () {
+      const html = '''
+<!DOCTYPE NETSCAPE-Bookmark-file-1>
+<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">
+<TITLE>Bookmarks</TITLE>
+<H1>Bookmarks</H1>
+<DL><p>
+    <DT><H3 ADD_DATE="1" PERSONAL_TOOLBAR_FOLDER="true">Bookmarks bar</H3>
+    <DL><p>
+        <DT><A HREF="https://example.com/?a=1&amp;b=2" ADD_DATE="1">Tom &amp; Jerry</A>
+        <DT><H3>News</H3>
+        <DL><p>
+            <DT><A HREF="https://news.test">News site</A>
+        </DL><p>
+        <DT><A HREF="https://after.test"></A>
+    </DL><p>
+    <DT><A HREF="place:sort=8">Recent</A>
+    <DT><A HREF="https://root.test">Root</A>
+</DL><p>
+''';
+      final marks = BookmarkFileParser.parse(html);
+      expect(marks.map((m) => m.url), [
+        'https://example.com/?a=1&b=2',
+        'https://news.test',
+        'https://after.test',
+        'https://root.test',
+      ]);
+      expect(marks[0].title, 'Tom & Jerry');
+      expect(marks[0].folder, 'Bookmarks bar');
+      expect(marks[1].folder, 'Bookmarks bar/News');
+      expect(marks[2].folder, 'Bookmarks bar');
+      expect(marks[2].title, 'https://after.test');
+      expect(marks[3].folder, isNull);
+    });
+
+    test('accepts Chromium Bookmarks JSON', () {
+      final json = jsonEncode({
+        'roots': {
+          'other': {
+            'type': 'folder',
+            'name': 'Other',
+            'children': [
+              {'type': 'url', 'name': 'X', 'url': 'https://x.test'},
+            ],
+          },
+        },
+      });
+      expect(BookmarkFileParser.parse(json).single.url, 'https://x.test');
+    });
+
+    test('rejects unrelated files', () {
+      expect(
+        () => BookmarkFileParser.parse('name,url,username,password'),
+        throwsFormatException,
+      );
+    });
+  });
+
   group('ChromiumReader.parseBookmarksJson', () {
     test('flattens nested folders with folder paths', () {
       const json = '''
@@ -124,10 +184,7 @@ void main() {
     )..createSync(recursive: true);
     File(p.join(ffProfile.path, 'places.sqlite')).writeAsStringSync('x');
 
-    final profiles = BrowserDetector(
-      localAppData: lad,
-      appData: ad,
-    ).detect();
+    final profiles = BrowserDetector(localAppData: lad, appData: ad).detect();
 
     expect(profiles.any((pr) => pr.browser == SourceBrowser.chrome), isTrue);
     final ff = profiles.firstWhere((pr) => pr.browser == SourceBrowser.firefox);
@@ -215,8 +272,30 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('1 found'), findsOneWidget); // bookmarks count
+    await tester.ensureVisible(find.text('Import 1'));
     await tester.tap(find.text('Import 1'));
     await tester.pumpAndSettle();
     expect(await db.watchBookmarks().first, hasLength(1));
+  });
+
+  testWidgets('ImportPage offers file import when no profiles are found', (
+    tester,
+  ) async {
+    final empty = Directory.systemTemp.createTempSync('6b_empty_').path;
+    addTearDown(() => Directory(empty).deleteSync(recursive: true));
+    final db = AppDatabase.inMemory();
+    addTearDown(db.close);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [databaseProvider.overrideWithValue(db)],
+        child: MaterialApp(
+          home: ImportPage(
+            detector: BrowserDetector(localAppData: empty, appData: empty),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Scan'), findsNothing);
+    expect(find.text('Choose bookmarks file'), findsOneWidget);
   });
 }
