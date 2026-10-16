@@ -2,6 +2,7 @@ import 'package:browser6/data/database.dart';
 import 'package:browser6/data/providers.dart';
 import 'package:browser6/features/tabs/tabs_controller.dart';
 import 'package:browser6/ui/browser_shell.dart';
+import 'package:browser6/ui/mobile_chrome.dart';
 import 'package:browser6/ui/tab_strip.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -50,13 +51,21 @@ void main() {
     expect(find.byType(TabChip), findsNWidgets(2));
   });
 
-  testWidgets('narrow layout hides the strip, shows count button and menu', (
+  testWidgets('narrow layout hides the strip and shows the bottom bar', (
     tester,
   ) async {
     final c = await pumpShell(tester, const Size(400, 800));
     expect(find.byType(TabStrip), findsNothing);
-    expect(find.byTooltip('Tabs'), findsOneWidget);
-    expect(find.byTooltip('Forward'), findsNothing); // moved into the menu
+    expect(find.byType(MobileBottomBar), findsOneWidget);
+    for (final t in ['Back', 'Forward', 'Home', 'Tabs', 'Menu']) {
+      expect(
+        find.descendant(
+          of: find.byType(MobileBottomBar),
+          matching: find.byTooltip(t),
+        ),
+        findsOneWidget,
+      );
+    }
 
     c.read(tabsProvider.notifier).newTab();
     await tester.pump();
@@ -64,7 +73,53 @@ void main() {
 
     await tester.tap(find.byTooltip('Tabs'));
     await tester.pumpAndSettle();
-    expect(find.text('2 tabs'), findsOneWidget);
+    expect(find.byType(TabSwitcherPage), findsOneWidget);
+    expect(find.byType(TabCard), findsNWidgets(2));
+  });
+
+  testWidgets('tab switcher selects, closes and opens private tabs', (
+    tester,
+  ) async {
+    final c = await pumpShell(tester, const Size(400, 800));
+    final first = c.read(tabsProvider).active!.id;
+    c.read(tabsProvider.notifier).newTab();
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Tabs'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(TabCard).first);
+    await tester.pumpAndSettle();
+    expect(find.byType(TabSwitcherPage), findsNothing);
+    expect(c.read(tabsProvider).activeId, first);
+
+    await tester.tap(find.byTooltip('Tabs'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Close tab').first);
+    await tester.pumpAndSettle();
+    expect(c.read(tabsProvider).tabs.length, 1);
+
+    await tester.tap(find.byTooltip('Private tabs'));
+    await tester.pumpAndSettle();
+    expect(find.text('No private tabs'), findsOneWidget);
+    await tester.tap(find.text('Private tab'));
+    await tester.pumpAndSettle();
+    expect(c.read(tabsProvider).active!.view.incognito, isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('phone menu opens as a sheet and starts a new tab', (
+    tester,
+  ) async {
+    final c = await pumpShell(tester, const Size(360, 700));
+    await tester.tap(find.byTooltip('Menu'));
+    await tester.pumpAndSettle();
+    expect(find.text('History'), findsOneWidget);
+    expect(find.text('Settings'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.byIcon(Icons.add_box_outlined));
+    await tester.pumpAndSettle();
+    expect(c.read(tabsProvider).tabs.length, 2);
   });
 
   testWidgets('phone address bar shows the host, full URL while editing', (

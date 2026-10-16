@@ -12,11 +12,13 @@ import '../features/tabs/url_input.dart';
 import '../features/themes/theme_service.dart';
 import 'bookmarks_bar.dart';
 import 'browser_theme.dart';
+import 'mobile_chrome.dart';
 import 'tab_strip.dart';
 import 'toolbar.dart';
 import 'window_caption.dart';
 
-/// Main window: tab strip (wide) or tab button (narrow), toolbar, page area.
+/// Main window: tab strip and toolbar on wide screens; on phones an address
+/// bar on top and a navigation bar (MobileBottomBar) below the page.
 class BrowserShell extends ConsumerStatefulWidget {
   const BrowserShell({super.key});
 
@@ -32,10 +34,15 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
     super.initState();
     // Provider state may not be modified while the tree is building.
     Future.microtask(() => ref.read(tabsProvider.notifier).start());
+    // The phone bottom bar hides while the address is being edited.
+    _addressFocus.addListener(_onAddressFocus);
   }
+
+  void _onAddressFocus() => setState(() {});
 
   @override
   void dispose() {
+    _addressFocus.removeListener(_onAddressFocus);
     _addressFocus.dispose();
     super.dispose();
   }
@@ -45,6 +52,8 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
     final state = ref.watch(tabsProvider);
     final ctl = ref.read(tabsProvider.notifier);
     final compact = MediaQuery.sizeOf(context).width < compactBreakpoint;
+    final typing =
+        _addressFocus.hasFocus || MediaQuery.viewInsetsOf(context).bottom > 0;
     final settings = ref.watch(appSettingsProvider);
     final view = state.active?.view;
     final colors = BrowserColors.of(context);
@@ -166,6 +175,7 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
                           ],
                         ),
                 ),
+                if (compact && !typing) chrome(const MobileBottomBar()),
               ],
             ),
           ),

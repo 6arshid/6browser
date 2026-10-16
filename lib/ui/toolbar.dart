@@ -15,7 +15,6 @@ import '../features/tabs/url_input.dart';
 import '../features/themes/theme_service.dart';
 import 'browser_theme.dart';
 import 'favicon.dart';
-import 'tab_strip.dart';
 
 /// Below this width the toolbar collapses secondary actions into a menu and
 /// the tab strip becomes a tab-count button.
@@ -162,23 +161,24 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Padding(
+            // Phones keep navigation in the bottom bar (MobileBottomBar), so
+            // the address bar gets the whole top row.
             padding: compact
-                ? const EdgeInsets.fromLTRB(4, 6, 2, 6)
+                ? const EdgeInsets.fromLTRB(10, 6, 4, 6)
                 : const EdgeInsets.fromLTRB(6, 5, 6, 5),
             child: Row(
               children: [
-                if (editing) const SizedBox(width: 6),
-                if (!editing) button('Back', Icons.arrow_back, view?.goBack),
-                if (!compact)
+                if (!compact) ...[
+                  button('Back', Icons.arrow_back, view?.goBack),
                   button('Forward', Icons.arrow_forward, view?.goForward),
-                if (!editing) reload,
-                if (!compact)
+                  reload,
                   button(
                     'Home',
                     Icons.home_outlined,
                     view == null ? null : () => view.load(settings.homeUrl),
                   ),
-                const SizedBox(width: 6),
+                  const SizedBox(width: 6),
+                ],
                 Expanded(
                   child: _Omnibox(
                     controller: _address,
@@ -188,7 +188,7 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
                     onGo: go,
                   ),
                 ),
-                const SizedBox(width: 6),
+                SizedBox(width: compact ? 2 : 6),
                 if (editing)
                   button('Cancel', Icons.close, widget.addressFocus.unfocus),
                 if (view != null && !editing)
@@ -210,9 +210,8 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
                       null => const SizedBox.shrink(),
                     },
                   ),
-                if (compact && !editing)
-                  _TabCountButton(count: state.tabs.length),
-                if (!editing) _MainMenu(view: view, compact: compact),
+                if (!compact) _MainMenu(view: view),
+                if (compact && !editing && view != null) reload,
               ],
             ),
           ),
@@ -326,7 +325,9 @@ class _Omnibox extends ConsumerWidget {
                             builder: (_, url, _) =>
                                 _SiteChip(url: url, color: colors.omniboxText),
                           ),
-                    suffixIcon: view == null ? null : _BookmarkStar(view: view),
+                    suffixIcon: view == null || compact
+                        ? null
+                        : _BookmarkStar(view: view),
                   ),
                   onTap: () => controller.selection = TextSelection(
                     baseOffset: 0,
@@ -496,10 +497,9 @@ class _BookmarkStar extends ConsumerWidget {
 
 /// The "⋮" menu, with icons and keyboard shortcuts like Chrome's.
 class _MainMenu extends ConsumerWidget {
-  const _MainMenu({required this.view, required this.compact});
+  const _MainMenu({required this.view});
 
   final BrowserView? view;
-  final bool compact;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -540,10 +540,6 @@ class _MainMenu extends ConsumerWidget {
             ctl.newTab();
           case 'incognito':
             ctl.newIncognitoTab();
-          case 'forward':
-            view?.goForward();
-          case 'home':
-            view?.load(settings.homeUrl);
           case 'devtools':
             view?.openDevTools();
           case 'bookmarks':
@@ -570,10 +566,6 @@ class _MainMenu extends ConsumerWidget {
           'New incognito tab',
           shortcut: 'Ctrl+Shift+N',
         ),
-        if (compact) ...[
-          item('forward', Icons.arrow_forward, 'Forward'),
-          item('home', Icons.home_outlined, 'Home'),
-        ],
         const PopupMenuDivider(),
         item('history', Icons.history, 'History', shortcut: 'Ctrl+H'),
         item(
@@ -601,38 +593,6 @@ class _MainMenu extends ConsumerWidget {
         const PopupMenuDivider(),
         item('devtools', Icons.code, 'Developer tools', shortcut: 'F12'),
       ],
-    );
-  }
-}
-
-class _TabCountButton extends ConsumerWidget {
-  const _TabCountButton({required this.count});
-
-  final int count;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final color = BrowserColors.of(context).icon;
-    return IconButton(
-      tooltip: 'Tabs',
-      onPressed: () => showTabSheet(context, ref),
-      icon: Container(
-        width: 22,
-        height: 22,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          border: Border.all(width: 1.8, color: color),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Text(
-          '$count',
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: color,
-          ),
-        ),
-      ),
     );
   }
 }
