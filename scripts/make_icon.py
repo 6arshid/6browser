@@ -5,6 +5,7 @@ logo on a transparent background):
   windows/runner/resources/app_icon.ico             exe / installer icon
   macos/Runner/Assets.xcassets/AppIcon.appiconset/  macOS app icons
   ios/Runner/Assets.xcassets/AppIcon.appiconset/    iOS app icons (opaque)
+  linux/runner/resources/app_icon.png               Linux window/launcher icon
   android/app/src/main/res/mipmap-*/                Android launcher icons
                                                     (legacy + adaptive)
 
@@ -46,6 +47,9 @@ sized(256).save(
 )
 for px in (16, 32, 64, 128, 256, 512, 1024):
     sized(px).save(MAC_DIR / f"app_icon_{px}.png")
+LINUX_DIR = ROOT / "linux" / "runner" / "resources"
+LINUX_DIR.mkdir(exist_ok=True)
+sized(256).save(LINUX_DIR / "app_icon.png")
 
 
 def on_tile(px, scale):
@@ -101,4 +105,4 @@ anydpi.mkdir(exist_ok=True)
 </resources>
 ''' % BACKGROUND[:3]
 )
-print("wrote assets/logo.png, app_icon.ico, macOS, iOS and Android icons")
+print("wrote assets/logo.png, app_icon.ico, macOS, iOS, Linux and Android icons")

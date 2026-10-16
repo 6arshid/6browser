@@ -1,0 +1,14 @@
+[Desktop Entry]
+# Launcher entry. When installing, copy this to ~/.local/share/applications/,
+# app_icon.png to ~/.local/share/icons/hicolor/256x256/apps/team.whitestudio.browser6.png,
+# and point Exec at the installed binary. The file name must match
+# APPLICATION_ID so Wayland docks pick up the icon.
+Type=Application
+Name=6browser
+Comment=Web browser
+Exec=browser6 %U
+Icon=team.whitestudio.browser6
+Terminal=false
+Categories=Network;WebBrowser;
+MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;
+StartupWMClass=team.whitestudio.browser6
