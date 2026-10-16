@@ -790,12 +790,12 @@ namespace webview_cef {
 		cefs.no_sandbox = true;
 #ifdef _WIN32
 		// 6browser patch: persistent profile (cookies, localStorage, cache) in
-		// %APPDATA%/team.whitestudio/browser6/cef_profile. Without cache_path CEF
+		// %APPDATA%/6arshid/6browser/cef_profile. Without cache_path CEF
 		// keeps everything in memory and the user is logged out on every start.
 		{
 			PWSTR roaming = nullptr;
 			if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &roaming)) && roaming) {
-				std::filesystem::path profile = std::filesystem::path(roaming) / L"team.whitestudio" / L"browser6" / L"cef_profile";
+				std::filesystem::path profile = std::filesystem::path(roaming) / L"6arshid" / L"6browser" / L"cef_profile";
 				CoTaskMemFree(roaming);
 				std::error_code ec;
 				std::filesystem::create_directories(profile, ec);

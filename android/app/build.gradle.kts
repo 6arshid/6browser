@@ -14,7 +14,7 @@ val keyProperties = Properties().apply {
 }
 
 android {
-    namespace = "team.whitestudio.browser6.browser6"
+    namespace = "com.sixarshid.sixbrowser"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -25,7 +25,7 @@ android {
 
     defaultConfig {
         // Google Play package name; it can never change after the first upload.
-        applicationId = "com.sixarshid.browser6"
+        applicationId = "com.sixarshid.sixbrowser"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

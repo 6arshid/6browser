@@ -1,4 +1,4 @@
-package team.whitestudio.browser6.browser6
+package com.sixarshid.sixbrowser
 
 import io.flutter.embedding.android.FlutterActivity
 

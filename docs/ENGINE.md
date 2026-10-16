@@ -119,7 +119,7 @@ Findings and patches in the vendored plugin:
 
 - **No persistent profile upstream.** `webview_cef` never set `cache_path`, so
   CEF ran fully in memory (cookies/localStorage lost on every start). On
-  Windows `startCEF` now uses `%APPDATA%\team.whitestudio\browser6\cef_profile`
+  Windows `startCEF` now uses `%APPDATA%\6arshid\6browser\cef_profile`
   as `root_cache_path`/`cache_path`. Linux/macOS are NOT patched yet.
   Side effect: a second 6browser instance on the same profile exits (CEF
   singleton lock).

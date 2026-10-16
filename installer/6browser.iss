@@ -12,7 +12,8 @@
 AppId={{2307D92A-03A6-40C5-8829-ED01F57293D5}
 AppName=6browser
 AppVersion=1.0.0
-AppPublisher=team.whitestudio
+AppPublisher=6arshid
+AppPublisherURL=https://www.6arshid.com
 DefaultDirName={autopf}\6browser
 DefaultGroupName=6browser
 UninstallDisplayIcon={app}\6browser.exe

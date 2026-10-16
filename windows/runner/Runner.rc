@@ -89,11 +89,11 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "team.whitestudio" "\0"
+            VALUE "CompanyName", "6arshid" "\0"
             VALUE "FileDescription", "6browser" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "6browser" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 team.whitestudio. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 6arshid. All rights reserved." "\0"
             VALUE "OriginalFilename", "6browser.exe" "\0"
             VALUE "ProductName", "6browser" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"

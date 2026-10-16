@@ -212,9 +212,9 @@ bash scripts/build_linux.sh
 ## Where data lives (Windows)
 
 - App database (bookmarks, history, settings, downloads):
-  `%APPDATA%\team.whitestudio\browser6\6browser.sqlite`
+  `%APPDATA%\6arshid\6browser\6browser.sqlite`
 - Browser profile (cookies, cache, localStorage):
-  `%APPDATA%\team.whitestudio\browser6\cef_profile`
+  `%APPDATA%\6arshid\6browser\cef_profile`
 
 Only one 6browser instance can use the profile at a time.
 
