@@ -1,0 +1,40 @@
+name: macOS build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci/macos-build]
+
+jobs:
+  build:
+    runs-on: macos-14   # Apple Silicon (arm64)
+    timeout-minutes: 90
+    env:
+      CEF_WRAPPER_BUILD_TYPE: Release
+      WEBVIEW_CEF_MACOS_ARCH: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.3
+          channel: stable
+          cache: true
+
+      - name: Install cmake and ninja
+        run: brew install cmake ninja || true
+
+      - name: Cache CEF
+        uses: actions/cache@v4
+        with:
+          path: third_party/webview_cef/macos/third/cef
+          key: cef-macos-arm64-${{ hashFiles('third_party/webview_cef/third/download.cmake', 'third_party/webview_cef/macos/scripts/download_cef.sh') }}
+
+      - name: Build and package
+        run: bash scripts/build_macos.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 6browser-macos-arm64
+          path: dist/6browser-macos.dmg
+          if-no-files-found: error
