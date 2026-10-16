@@ -28,12 +28,25 @@ class FakeView implements BrowserView {
   Future<void> goBack() async {}
   @override
   Future<void> goForward() async {}
+  int reloads = 0;
   @override
-  Future<void> reload() async {}
+  Future<void> reload() async => reloads++;
   @override
   Future<void> stop() async {}
   @override
   Future<void> openDevTools() async {}
+  final contextMenuController = StreamController<PageContextMenu>.broadcast();
+  final editCommands = <EditCommand>[];
+  final downloads = <String>[];
+  @override
+  Stream<PageContextMenu> get contextMenus => contextMenuController.stream;
+  @override
+  Future<void> editCommand(EditCommand command) async =>
+      editCommands.add(command);
+  @override
+  Future<void> download(String url) async => downloads.add(url);
+  @override
+  Future<void> inspectAt(Offset pagePosition) async {}
   @override
   Future<void> dispose() async => disposed = true;
 }

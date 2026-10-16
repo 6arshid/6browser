@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_cef/webview_cef.dart';
@@ -49,6 +51,7 @@ class CefBrowserView implements BrowserView {
         onUrlChanged: (u) => _url.value = u,
         onLoadStart: (_, _) => _isLoading.value = true,
         onLoadEnd: (_, _) => _isLoading.value = false,
+        onContextMenu: (m) => _contextMenus.add(_toPageMenu(m)),
       ),
     );
     _url.value = initialUrl;
@@ -64,6 +67,7 @@ class CefBrowserView implements BrowserView {
   final _title = ValueNotifier<String>('');
   final _isLoading = ValueNotifier<bool>(false);
   final _isReady = ValueNotifier<bool>(false);
+  final _contextMenus = StreamController<PageContextMenu>.broadcast();
 
   @override
   ValueListenable<String> get url => _url;
@@ -96,5 +100,46 @@ class CefBrowserView implements BrowserView {
   Future<void> openDevTools() => _controller.openDevTools();
 
   @override
-  Future<void> dispose() => _controller.dispose();
+  Stream<PageContextMenu> get contextMenus => _contextMenus.stream;
+  @override
+  Future<void> editCommand(EditCommand command) =>
+      _controller.editCommand(command.name);
+  @override
+  Future<void> download(String url) => _controller.startDownload(url);
+  @override
+  Future<void> inspectAt(Offset pagePosition) =>
+      _controller.inspectElementAt(pagePosition);
+
+  @override
+  Future<void> dispose() {
+    _contextMenus.close();
+    return _controller.dispose();
+  }
+}
+
+// CEF flag values (include/internal/cef_types.h).
+const _typeEditable = 1 << 5; // CM_TYPEFLAG_EDITABLE
+const _mediaImage = 1; // CM_MEDIATYPE_IMAGE
+const _editUndo = 1 << 0, _editRedo = 1 << 1, _editCut = 1 << 2;
+const _editCopy = 1 << 3, _editPaste = 1 << 4, _editSelectAll = 1 << 6;
+
+PageContextMenu _toPageMenu(WebviewContextMenu m) {
+  bool edit(int flag) => m.editFlags & flag != 0;
+  return PageContextMenu(
+    position: m.position,
+    pagePosition: m.pagePosition,
+    pageUrl: m.pageUrl,
+    linkUrl: m.linkUrl,
+    imageUrl: m.mediaType == _mediaImage ? m.srcUrl : '',
+    selectionText: m.selectionText,
+    isEditable: m.typeFlags & _typeEditable != 0,
+    canUndo: edit(_editUndo),
+    canRedo: edit(_editRedo),
+    canCut: edit(_editCut),
+    canCopy: edit(_editCopy),
+    canPaste: edit(_editPaste),
+    canSelectAll: edit(_editSelectAll),
+    canGoBack: m.canGoBack,
+    canGoForward: m.canGoForward,
+  );
 }

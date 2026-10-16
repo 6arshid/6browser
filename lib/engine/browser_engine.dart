@@ -35,7 +35,65 @@ abstract class BrowserView {
   bool get supportsStop;
 
   Future<void> openDevTools();
+
+  /// Right-click (context menu) requests from the page. The app draws the
+  /// menu. Backends that show a native menu themselves never emit.
+  Stream<PageContextMenu> get contextMenus;
+
+  /// Runs an editing command on the focused frame.
+  Future<void> editCommand(EditCommand command);
+
+  /// Downloads [url] (Save link as / Save image as).
+  Future<void> download(String url);
+
+  /// Opens DevTools with the element at [pagePosition] selected.
+  Future<void> inspectAt(Offset pagePosition);
+
   Future<void> dispose();
+}
+
+enum EditCommand { undo, redo, cut, copy, paste, delete, selectAll }
+
+/// What was under the pointer when the page asked for a context menu.
+class PageContextMenu {
+  const PageContextMenu({
+    required this.position,
+    this.pagePosition = Offset.zero,
+    this.pageUrl = '',
+    this.linkUrl = '',
+    this.imageUrl = '',
+    this.selectionText = '',
+    this.isEditable = false,
+    this.canUndo = false,
+    this.canRedo = false,
+    this.canCut = false,
+    this.canCopy = false,
+    this.canPaste = false,
+    this.canSelectAll = false,
+    this.canGoBack = false,
+    this.canGoForward = false,
+  });
+
+  /// Where to show the menu, in global logical pixels.
+  final Offset position;
+
+  /// The same point in page coordinates.
+  final Offset pagePosition;
+  final String pageUrl;
+
+  /// Empty unless the pointer was over a link / an image.
+  final String linkUrl;
+  final String imageUrl;
+  final String selectionText;
+  final bool isEditable;
+  final bool canUndo;
+  final bool canRedo;
+  final bool canCut;
+  final bool canCopy;
+  final bool canPaste;
+  final bool canSelectAll;
+  final bool canGoBack;
+  final bool canGoForward;
 }
 
 /// Progress report for one download.

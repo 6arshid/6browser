@@ -9,6 +9,7 @@
 #include <thread>
 #include <iostream>
 #include <unordered_map>
+#include <vector>
 #include <filesystem>
 #ifdef _WIN32
 #include <shlobj.h>
@@ -280,6 +281,34 @@ namespace webview_cef {
                 }
             };
 
+            m_handler->onContextMenuEvent = [=, this](int nBrowserId, const context_menu_info& info)
+            {
+                if (m_invokeFunc)
+                {
+                    WValue* retMap = webview_value_new_map();
+                    std::vector<WValue*> owned;
+                    auto put = [&](const char* key, WValue* v) {
+                        webview_value_set_string(retMap, key, v);
+                        owned.push_back(v);
+                    };
+                    put("browserId", webview_value_new_int(nBrowserId));
+                    put("x", webview_value_new_int(info.x));
+                    put("y", webview_value_new_int(info.y));
+                    put("typeFlags", webview_value_new_int(info.typeFlags));
+                    put("mediaType", webview_value_new_int(info.mediaType));
+                    put("editFlags", webview_value_new_int(info.editFlags));
+                    put("linkUrl", webview_value_new_string(const_cast<char*>(info.linkUrl.c_str())));
+                    put("srcUrl", webview_value_new_string(const_cast<char*>(info.srcUrl.c_str())));
+                    put("pageUrl", webview_value_new_string(const_cast<char*>(info.pageUrl.c_str())));
+                    put("selectionText", webview_value_new_string(const_cast<char*>(info.selectionText.c_str())));
+                    put("canGoBack", webview_value_new_bool(info.canGoBack));
+                    put("canGoForward", webview_value_new_bool(info.canGoForward));
+                    m_invokeFunc("onContextMenu", retMap);
+                    for (auto* v : owned) webview_value_unref(v);
+                    webview_value_unref(retMap);
+                }
+            };
+
 			m_init = true;
 		}
 	}
@@ -296,6 +325,7 @@ namespace webview_cef {
 		m_handler->onJavaScriptChannelMessage = nullptr;
 		m_handler->onFocusedNodeChangeMessage = nullptr;
 		m_handler->onImeCompositionRangeChangedMessage = nullptr;
+		m_handler->onContextMenuEvent = nullptr;
 		m_init = false;
 	}
 
@@ -381,6 +411,25 @@ namespace webview_cef {
 		else if (name.compare("reload") == 0) {
 			int browserId = int(webview_value_get_int(values));
 			m_handler->reload(browserId);
+			result(1, nullptr);
+		}
+		else if (name.compare("inspectElementAt") == 0) {
+			int browserId = int(webview_value_get_int(webview_value_get_list_value(values, 0)));
+			int x = int(webview_value_get_int(webview_value_get_list_value(values, 1)));
+			int y = int(webview_value_get_int(webview_value_get_list_value(values, 2)));
+			m_handler->inspectElementAt(browserId, x, y);
+			result(1, nullptr);
+		}
+		else if (name.compare("editCommand") == 0) {
+			int browserId = int(webview_value_get_int(webview_value_get_list_value(values, 0)));
+			const auto command = webview_value_get_string(webview_value_get_list_value(values, 1));
+			if (command != nullptr) m_handler->editCommand(browserId, command);
+			result(1, nullptr);
+		}
+		else if (name.compare("startDownload") == 0) {
+			int browserId = int(webview_value_get_int(webview_value_get_list_value(values, 0)));
+			const auto url = webview_value_get_string(webview_value_get_list_value(values, 1));
+			if (url != nullptr) m_handler->startDownload(browserId, url);
 			result(1, nullptr);
 		}
 		else if (name.compare("openDevTools") == 0) {			
@@ -680,20 +729,23 @@ namespace webview_cef {
 	}
 	
 	int WebviewPlugin::cursorAction(WValue *args, std::string name) {
-		if (!args || webview_value_get_len(args) != 3) {
+		if (!args || webview_value_get_len(args) < 3) {
 			return 0;
 		}
 		int browserId = int(webview_value_get_int(webview_value_get_list_value(args, 0)));
 		int x = int(webview_value_get_int(webview_value_get_list_value(args, 1)));
 		int y = int(webview_value_get_int(webview_value_get_list_value(args, 2)));
+		// 6browser patch: optional mouse button (0 left, 1 middle, 2 right).
+		int button = webview_value_get_len(args) > 3
+			? int(webview_value_get_int(webview_value_get_list_value(args, 3))) : 0;
 		if (!x && !y) {
 			return 0;
 		}
 		if (name.compare("cursorClickDown") == 0) {
-			m_handler->cursorClick(browserId, x, y, false);
+			m_handler->cursorClick(browserId, x, y, false, button);
 		}
 		else if (name.compare("cursorClickUp") == 0) {
-			m_handler->cursorClick(browserId, x, y, true);
+			m_handler->cursorClick(browserId, x, y, true, button);
 		}
 		else if (name.compare("cursorMove") == 0) {
 			m_handler->cursorMove(browserId, x, y, false);

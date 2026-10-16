@@ -109,6 +109,16 @@ class AndroidBrowserView implements BrowserView {
   @override
   Future<void> openDevTools() async {}
 
+  // The Android WebView shows its own long-press text selection menu.
+  @override
+  Stream<PageContextMenu> get contextMenus => const Stream.empty();
+  @override
+  Future<void> editCommand(EditCommand command) async {}
+  @override
+  Future<void> download(String url) async {}
+  @override
+  Future<void> inspectAt(Offset pagePosition) async {}
+
   @override
   Future<void> dispose() async {
     if (incognito) {

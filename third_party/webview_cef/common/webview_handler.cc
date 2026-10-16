@@ -430,13 +430,18 @@ void WebviewHandler::changeSize(int browserId, float a_dpi, int w, int h)
     }
 }
 
-void WebviewHandler::cursorClick(int browserId, int x, int y, bool up)
+void WebviewHandler::cursorClick(int browserId, int x, int y, bool up, int button)
 {
     auto it = browser_map_.find(browserId);
     if (it != browser_map_.end()) {
         CefMouseEvent ev;
         ev.x = x;
         ev.y = y;
+        if (button == MBT_RIGHT || button == MBT_MIDDLE) {
+            ev.modifiers = button == MBT_RIGHT ? EVENTFLAG_RIGHT_MOUSE_BUTTON : EVENTFLAG_MIDDLE_MOUSE_BUTTON;
+            it->second.browser->GetHost()->SendMouseClickEvent(ev, static_cast<CefBrowserHost::MouseButtonType>(button), up, 1);
+            return;
+        }
         ev.modifiers = EVENTFLAG_LEFT_MOUSE_BUTTON;
         if(up && it->second.is_dragging) {
             it->second.browser->GetHost()->DragTargetDrop(ev);
@@ -555,6 +560,63 @@ void WebviewHandler::openDevTools(int browserId) {
 #endif
         it->second.browser->GetHost()->ShowDevTools(windowInfo, this, CefBrowserSettings(), CefPoint());
     }
+}
+
+void WebviewHandler::inspectElementAt(int browserId, int x, int y) {
+    auto it = browser_map_.find(browserId);
+    if (it != browser_map_.end()) {
+        CefWindowInfo windowInfo;
+#ifdef OS_WIN
+        windowInfo.SetAsPopup(nullptr, "DevTools");
+#endif
+        it->second.browser->GetHost()->ShowDevTools(windowInfo, this, CefBrowserSettings(), CefPoint(x, y));
+    }
+}
+
+void WebviewHandler::editCommand(int browserId, const std::string& command) {
+    auto it = browser_map_.find(browserId);
+    if (it == browser_map_.end()) return;
+    CefRefPtr<CefFrame> frame = it->second.browser->GetFocusedFrame();
+    if (!frame) frame = it->second.browser->GetMainFrame();
+    if (command == "undo") frame->Undo();
+    else if (command == "redo") frame->Redo();
+    else if (command == "cut") frame->Cut();
+    else if (command == "copy") frame->Copy();
+    else if (command == "paste") frame->Paste();
+    else if (command == "delete") frame->Delete();
+    else if (command == "selectAll") frame->SelectAll();
+}
+
+void WebviewHandler::startDownload(int browserId, const std::string& url) {
+    auto it = browser_map_.find(browserId);
+    if (it != browser_map_.end()) {
+        it->second.browser->GetHost()->StartDownload(url);
+    }
+}
+
+void WebviewHandler::OnBeforeContextMenu(CefRefPtr<CefBrowser> browser,
+                                         CefRefPtr<CefFrame> frame,
+                                         CefRefPtr<CefContextMenuParams> params,
+                                         CefRefPtr<CefMenuModel> model) {
+    // DevTools windows share this client; leave their native menu alone.
+    if (browser_map_.find(browser->GetIdentifier()) == browser_map_.end()) return;
+    // Off-screen rendering cannot show the native menu, so hand the details
+    // to the host and show nothing here.
+    model->Clear();
+    if (!onContextMenuEvent) return;
+    context_menu_info info;
+    info.x = params->GetXCoord();
+    info.y = params->GetYCoord();
+    info.typeFlags = static_cast<int>(params->GetTypeFlags());
+    info.mediaType = static_cast<int>(params->GetMediaType());
+    info.editFlags = static_cast<int>(params->GetEditStateFlags());
+    info.linkUrl = params->GetLinkUrl().ToString();
+    info.srcUrl = params->GetSourceUrl().ToString();
+    info.pageUrl = params->GetPageUrl().ToString();
+    info.selectionText = params->GetSelectionText().ToString();
+    info.canGoBack = browser->CanGoBack();
+    info.canGoForward = browser->CanGoForward();
+    onContextMenuEvent(browser->GetIdentifier(), info);
 }
 
 void WebviewHandler::imeSetComposition(int browserId, std::string text)

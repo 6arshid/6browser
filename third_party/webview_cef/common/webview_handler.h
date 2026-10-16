@@ -37,12 +37,29 @@ struct browser_info{
     bool focus_reasserted = false;
 };
 
+// 6browser patch: what was under the cursor when a context menu was requested.
+// The native menu is suppressed and the host draws its own.
+struct context_menu_info {
+    int x = 0;
+    int y = 0;
+    int typeFlags = 0;   // cef_context_menu_type_flags_t
+    int mediaType = 0;   // cef_context_menu_media_type_t
+    int editFlags = 0;   // cef_context_menu_edit_state_flags_t
+    std::string linkUrl;
+    std::string srcUrl;
+    std::string pageUrl;
+    std::string selectionText;
+    bool canGoBack = false;
+    bool canGoForward = false;
+};
+
 class WebviewHandler : public CefClient,
 public CefDisplayHandler,
 public CefLifeSpanHandler,
 public CefFocusHandler,
 public CefLoadHandler,
 public CefDownloadHandler,
+public CefContextMenuHandler,
 public CefRenderHandler{
 public:
     //Paint callback (software off-screen rendering)
@@ -65,6 +82,8 @@ public:
     std::function<void(std::string, std::string, std::string, int browserId, std::string)> onJavaScriptChannelMessage;
     std::function<void(int browserId, std::string url)> onLoadStart;
     std::function<void(int browserId, std::string url)> onLoadEnd;
+    // 6browser patch: a page asked for a context menu.
+    std::function<void(int browserId, const context_menu_info& info)> onContextMenuEvent;
     
     explicit WebviewHandler();
     ~WebviewHandler();
@@ -81,6 +100,13 @@ public:
     }
     virtual CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
     virtual CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
+    virtual CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
+
+    // CefContextMenuHandler methods (6browser patch):
+    void OnBeforeContextMenu(CefRefPtr<CefBrowser> browser,
+                             CefRefPtr<CefFrame> frame,
+                             CefRefPtr<CefContextMenuParams> params,
+                             CefRefPtr<CefMenuModel> model) override;
 
     // CefDownloadHandler methods (6browser patch):
     bool OnBeforeDownload(CefRefPtr<CefBrowser> browser,
@@ -184,7 +210,8 @@ public:
 
     void sendScrollEvent(int browserId, int x, int y, int deltaX, int deltaY);
     void changeSize(int browserId, float a_dpi, int width, int height);
-    void cursorClick(int browserId, int x, int y, bool up);
+    // |button|: 0 left, 1 middle, 2 right (cef_mouse_button_type_t).
+    void cursorClick(int browserId, int x, int y, bool up, int button = 0);
     void cursorMove(int browserId, int x, int y, bool dragging);
     void sendKeyEvent(CefKeyEvent& ev);
     void loadUrl(int browserId, std::string url);
@@ -192,6 +219,11 @@ public:
     void goBack(int browserId);
     void reload(int browserId);
     void openDevTools(int browserId);
+    // 6browser patch: context menu actions.
+    void inspectElementAt(int browserId, int x, int y);
+    // |command|: undo, redo, cut, copy, paste, delete, selectAll.
+    void editCommand(int browserId, const std::string& command);
+    void startDownload(int browserId, const std::string& url);
 
     void imeSetComposition(int browserId, std::string text);
     void imeCommitText(int browserId, std::string text);

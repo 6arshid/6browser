@@ -121,6 +121,58 @@ class WebViewController extends ValueNotifier<bool> {
     return _pluginChannel.invokeMethod('loadUrl', [_browserId, url]);
   }
 
+  /// 6browser patch: runs an editing command on the focused frame:
+  /// undo, redo, cut, copy, paste, delete or selectAll.
+  Future<void> editCommand(String command) async {
+    if (_isDisposed) {
+      return;
+    }
+    assert(value);
+    return _pluginChannel.invokeMethod('editCommand', [_browserId, command]);
+  }
+
+  /// 6browser patch: downloads [url] as if the user had clicked a download.
+  Future<void> startDownload(String url) async {
+    if (_isDisposed) {
+      return;
+    }
+    assert(value);
+    return _pluginChannel.invokeMethod('startDownload', [_browserId, url]);
+  }
+
+  /// 6browser patch: opens DevTools with the element at [pagePosition]
+  /// selected.
+  Future<void> inspectElementAt(Offset pagePosition) async {
+    if (_isDisposed) {
+      return;
+    }
+    assert(value);
+    return _pluginChannel.invokeMethod('inspectElementAt',
+        [_browserId, pagePosition.dx.round(), pagePosition.dy.round()]);
+  }
+
+  /// Called by [WebviewManager] when the page asks for a context menu.
+  void handleContextMenu(Map<String, dynamic> args) {
+    final page = Offset(
+        (args['x'] as int).toDouble(), (args['y'] as int).toDouble());
+    _listener?.onContextMenu?.call(WebviewContextMenu(
+      position: _localToGlobal?.call(page) ?? page,
+      pagePosition: page,
+      typeFlags: args['typeFlags'] as int,
+      mediaType: args['mediaType'] as int,
+      editFlags: args['editFlags'] as int,
+      linkUrl: args['linkUrl'] as String,
+      srcUrl: args['srcUrl'] as String,
+      pageUrl: args['pageUrl'] as String,
+      selectionText: args['selectionText'] as String,
+      canGoBack: args['canGoBack'] as bool,
+      canGoForward: args['canGoForward'] as bool,
+    ));
+  }
+
+  /// Set by [WebViewState]: maps page coordinates to global ones.
+  Offset Function(Offset local)? _localToGlobal;
+
   /// Reloads the current document.
   Future<void> reload() async {
     if (_isDisposed) {
@@ -258,22 +310,23 @@ class WebViewController extends ValueNotifier<bool> {
         [_browserId, position.dx.round(), position.dy.round()]);
   }
 
-  Future<void> _cursorClickDown(Offset position) async {
+  // 6browser patch: [button] is 0 left, 1 middle, 2 right.
+  Future<void> _cursorClickDown(Offset position, [int button = 0]) async {
     if (_isDisposed) {
       return;
     }
     assert(value);
     return _pluginChannel.invokeMethod('cursorClickDown',
-        [_browserId, position.dx.round(), position.dy.round()]);
+        [_browserId, position.dx.round(), position.dy.round(), button]);
   }
 
-  Future<void> _cursorClickUp(Offset position) async {
+  Future<void> _cursorClickUp(Offset position, [int button = 0]) async {
     if (_isDisposed) {
       return;
     }
     assert(value);
     return _pluginChannel.invokeMethod('cursorClickUp',
-        [_browserId, position.dx.round(), position.dy.round()]);
+        [_browserId, position.dx.round(), position.dy.round(), button]);
   }
 
   /// Sets the horizontal and vertical scroll delta.
@@ -335,6 +388,21 @@ class WebViewState extends State<WebView> with WebeViewTextInput {
   bool? _hasNativeKeySupport;
 
   WebViewController get _controller => widget.controller;
+
+  // 6browser patch: the button of the press in progress, so the matching
+  // release (whose `buttons` is already 0) goes to the same button.
+  int _pressedButton = 0;
+
+  static int _cefButton(int buttons) => (buttons & kSecondaryMouseButton) != 0
+      ? 2
+      : (buttons & kMiddleMouseButton) != 0
+          ? 1
+          : 0;
+
+  Offset _pageToGlobal(Offset local) {
+    final box = _key.currentContext?.findRenderObject() as RenderBox?;
+    return box == null ? local : box.localToGlobal(local);
+  }
 
   @override
   updateEditingValueWithDeltas(List<TextEditingDelta> textEditingDeltas) {
@@ -585,13 +653,21 @@ class WebViewState extends State<WebView> with WebeViewTextInput {
                 }
               });
             }
-            _controller._cursorClickDown(ev.localPosition);
+            _pressedButton = _cefButton(ev.buttons);
+            _controller._localToGlobal = _pageToGlobal;
+            _controller._cursorClickDown(ev.localPosition, _pressedButton);
           },
           onPointerUp: (ev) {
-            _controller._cursorClickUp(ev.localPosition);
+            _controller._cursorClickUp(ev.localPosition, _pressedButton);
+            _pressedButton = 0;
           },
           onPointerMove: (ev) {
-            _controller._cursorDragging(ev.localPosition);
+            // Only a left-button drag selects text or drags content.
+            if (_pressedButton == 0) {
+              _controller._cursorDragging(ev.localPosition);
+            } else {
+              _controller._cursorMove(ev.localPosition);
+            }
           },
           onPointerSignal: (signal) {
             if (signal is PointerScrollEvent) {

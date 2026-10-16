@@ -13,6 +13,7 @@ import '../features/themes/theme_service.dart';
 import 'bookmarks_bar.dart';
 import 'browser_theme.dart';
 import 'mobile_chrome.dart';
+import 'page_context_menu.dart';
 import 'tab_strip.dart';
 import 'toolbar.dart';
 import 'window_caption.dart';
@@ -155,7 +156,10 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
                                     ValueListenableBuilder<bool>(
                                       valueListenable: t.view.isReady,
                                       builder: (_, ready, _) => ready
-                                          ? t.view.widget
+                                          ? PageContextMenuHost(
+                                              view: t.view,
+                                              child: t.view.widget,
+                                            )
                                           : const Center(
                                               child:
                                                   CircularProgressIndicator(),
