@@ -315,8 +315,11 @@ class _Omnibox extends ConsumerWidget {
                       fontSize: fontSize,
                       color: colors.omniboxText.withValues(alpha: 0.6),
                     ),
+                    // The fill only covers the tallest child; on phones
+                    // there is no star, so the chip sets the full height.
                     prefixIconConstraints: BoxConstraints(
                       minWidth: compact ? 44 : 40,
+                      minHeight: height,
                     ),
                     prefixIcon: view == null
                         ? null

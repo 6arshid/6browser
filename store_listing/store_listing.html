@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>6browser Store Listing</title>
+<style>
+  :root {
+    --bg: #f5f7fb; --card: #ffffff; --text: #16181d; --muted: #5d6270;
+    --line: #e2e6ee; --accent: #1062d6; --accent-soft: #e5efff;
+    --ok: #1b7f4b; --warn-bg: #fff6dc; --warn: #8a5a00; --code: #f0f2f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101217; --card: #181b22; --text: #e8e9ee; --muted: #9ba0ad;
+      --line: #2a2e38; --accent: #6aa6ff; --accent-soft: #1b2a44;
+      --ok: #58c98b; --warn-bg: #3a2f12; --warn: #f3c45a; --code: #20242d;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #101217; --card: #181b22; --text: #e8e9ee; --muted: #9ba0ad;
+    --line: #2a2e38; --accent: #6aa6ff; --accent-soft: #1b2a44;
+    --ok: #58c98b; --warn-bg: #3a2f12; --warn: #f3c45a; --code: #20242d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  }
+  header {
+    background: linear-gradient(135deg, #0a225c, #1062d6); color: #fff;
+    padding: 36px 16px 30px;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+  header .wrap { display: flex; gap: 20px; align-items: center; }
+  header img { width: 76px; height: 76px; border-radius: 18px; background: #fff; padding: 8px; }
+  header h1 { margin: 0; font-size: 30px; }
+  header p { margin: 4px 0 0; opacity: .85; }
+  nav { position: sticky; top: 0; z-index: 5; background: var(--card); border-bottom: 1px solid var(--line); }
+  nav .wrap { display: flex; gap: 6px; overflow-x: auto; padding-top: 8px; padding-bottom: 8px; }
+  nav a {
+    white-space: nowrap; text-decoration: none; color: var(--text); padding: 6px 12px;
+    border-radius: 999px; font-weight: 600; font-size: 14px;
+  }
+  nav a:hover { background: var(--accent-soft); color: var(--accent); }
+  main { padding: 24px 0 60px; }
+  h2 { font-size: 24px; margin: 40px 0 6px; }
+  h2 small { font-size: 14px; color: var(--muted); font-weight: 500; }
+  h3 { font-size: 17px; margin: 26px 0 8px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin: 12px 0; }
+  .field { margin: 14px 0 22px; }
+  .field-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+  .field-head strong { font-size: 15px; }
+  .count { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .count.over { color: #d93025; font-weight: 700; }
+  .copy {
+    margin-left: auto; border: 1px solid var(--line); background: var(--card); color: var(--accent);
+    border-radius: 8px; padding: 4px 12px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .copy:hover { background: var(--accent-soft); }
+  .copy.done { color: var(--ok); }
+  .text {
+    background: var(--code); border-radius: 10px; padding: 12px 14px; white-space: pre-wrap;
+    word-wrap: break-word; font-size: 14px; margin: 0;
+  }
+  .hint { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
+  .note { background: var(--warn-bg); color: var(--warn); border-radius: 10px; padding: 10px 14px; font-size: 14px; }
+  .ph { background: var(--warn-bg); color: var(--warn); padding: 0 4px; border-radius: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; }
+  .table-scroll { overflow-x: auto; }
+  .gallery { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .gallery.wide { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+  .gallery a { display: block; color: var(--muted); text-decoration: none; font-size: 12px; }
+  .gallery img { width: 100%; border-radius: 10px; border: 1px solid var(--line); display: block; margin-bottom: 4px; }
+  ul.check { padding-left: 0; list-style: none; margin: 0; }
+  ul.check li { padding: 6px 0 6px 30px; position: relative; border-bottom: 1px dashed var(--line); }
+  ul.check li::before { content: "☐"; position: absolute; left: 4px; top: 4px; font-size: 17px; color: var(--accent); }
+  .pill { display: inline-block; background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 2px 10px; font-size: 13px; font-weight: 600; margin: 2px; }
+  footer { color: var(--muted); font-size: 13px; text-align: center; padding: 20px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <img src="graphics/play-icon-512.png" alt="6browser icon">
+    <div>
+      <h1>6browser: Store Listing Kit</h1>
+      <p>Everything to submit 6browser to Google Play and the Microsoft Store. Copy each field with one click.</p>
+    </div>
+  </div>
+</header>
+<nav>
+  <div class="wrap">
+    <a href="#play">Google Play</a>
+    <a href="#ms">Microsoft Store</a>
+    <a href="#features">Feature list</a>
+    <a href="#assets">Images</a>
+    <a href="#privacy">Privacy policy</a>
+    <a href="#checklist">Checklist</a>
+  </div>
+</nav>
+
+<main class="wrap">
+  <div class="note">
+    Upload <a href="privacy-policy.html">privacy-policy.html</a> to <span class="ph">https://www.6arshid.com/6browser/privacy-policy.html</span> (or change the URL below to wherever you put it).
+    Character counts update live and turn red if a field is over the store limit.
+  </div>
+
+  <!-- ============================ GOOGLE PLAY ============================ -->
+  <h2 id="play">Google Play <small>Play Console → Grow → Store presence → Main store listing</small></h2>
+
+  <div class="card">
+    <div class="field" data-max="30">
+      <div class="field-head"><strong>App name</strong><span class="count"></span><button class="copy">Copy</button></div>
+      <pre class="text">6browser: Fast Web Browser</pre>
+    </div>
+
+    <div class="field" data-max="80">
+      <div class="field-head"><strong>Short description</strong><span class="count"></span><button class="copy">Copy</button></div>
+      <pre class="text">Fast, lightweight browser with tabs, private mode, bookmarks and dark mode.</pre>
+    </div>
+
+    <div class="field" data-max="4000">
+      <div class="field-head"><strong>Full description</strong><span class="count"></span><button class="copy">Copy</button></div>
+<pre class="text">6browser is a fast, lightweight web browser that gets out of your way. It opens quickly, loads pages fast and keeps the screen clean, so you can focus on the web instead of the browser.
+
+FAST BY DESIGN
+• Lightweight app with no bloat: no news feeds, no pop-up offers, no extra toolbars
+• Modern web engine for quick, smooth page loading
+• Smart address bar: type a website or search right away, with suggestions from your history
+• Big, thumb-friendly navigation bar at the bottom: back, forward, home, tabs and menu
+
+TABS THAT KEEP UP
+• Open as many tabs as you need
+• Switch tabs in a flash from a simple grid
+• Close tabs with one tap
+• Separate lists for normal and private tabs
+
+PRIVATE BROWSING
+• Private tabs keep no browsing history, and their cached site data is cleared when you close them
+• No account and no sign-in needed
+• 6browser does not collect analytics or show ads. Your history and bookmarks stay on your device
+
+YOUR NEW TAB PAGE
+• A clean start page with a search box
+• Your most visited sites and your own shortcuts
+• Add, edit, remove and reorder shortcuts
+
+BOOKMARKS AND HISTORY
+• Bookmark any page with one tap
+• Bookmarks bar on the New Tab page for quick access
+• Searchable history: delete a single page or clear everything
+• Import bookmarks from an HTML file exported by Chrome, Edge, Firefox or Brave
+
+LOOKS THE WAY YOU LIKE
+• Light, dark or follow the system theme
+• Accent colors to make the browser yours
+• Install Chrome themes from the Chrome Web Store
+
+SIMPLE SETTINGS
+• Choose your search engine: Google, DuckDuckGo or Bing
+• Set your own home page
+
+6browser is also available for Windows.
+
+Have an idea or found a bug? Write to us at info@6arshid.com. We read every message.</pre>
+    </div>
+
+    <div class="field" data-max="500">
+      <div class="field-head"><strong>Release notes ("What's new") for version 1.0.0</strong><span class="count"></span><button class="copy">Copy</button></div>
+<pre class="text">Welcome to 6browser 1.0!
+• Fast, lightweight browsing with a clean interface
+• Tabs with a quick tab switcher and private tabs
+• New Tab page with shortcuts and most visited sites
+• Bookmarks and searchable history
+• Light and dark mode, accent colors and Chrome themes</pre>
+    </div>
+  </div>
+
+  <h3>Store settings and app content</h3>
+  <div class="card table-scroll">
+    <table>
+      <tr><th>Field</th><th>Value</th><th>Notes</th></tr>
+      <tr><td>App or game</td><td>App</td><td></td></tr>
+      <tr><td>Category</td><td>Communication</td><td>Play puts web browsers in Communication (Chrome and Firefox are there too).</td></tr>
+      <tr><td>Tags</td><td><span class="pill">Web browser</span><span class="pill">Private browsing</span><span class="pill">Productivity</span></td><td>Choose up to 5 from Play's list.</td></tr>
+      <tr><td>Free or paid</td><td>Free</td><td></td></tr>
+      <tr><td>Contains ads</td><td>No</td><td></td></tr>
+      <tr><td>In-app purchases</td><td>No</td><td></td></tr>
+      <tr><td>Email address</td><td>info@6arshid.com</td><td>Required and shown publicly.</td></tr>
+      <tr><td>Website</td><td>https://www.6arshid.com</td><td>Optional.</td></tr>
+      <tr><td>Privacy policy URL</td><td><span class="ph">https://www.6arshid.com/6browser/privacy-policy.html</span></td><td>Required. Upload <a href="privacy-policy.html">privacy-policy.html</a> to this address.</td></tr>
+      <tr><td>Target audience</td><td>18 and over</td><td>A browser gives open access to the internet. Choosing 18+ keeps the app out of the Families program.</td></tr>
+      <tr><td>Content rating (IARC)</td><td>Category: "All other app types"</td><td>Answer <b>Yes</b> to "Does the app allow users to access unrestricted internet content (for example, a web browser)?". Answer No for violence, sexual content, gambling and user-to-user chat. You will usually get Teen / PEGI 12 or higher.</td></tr>
+      <tr><td>News app</td><td>No</td><td></td></tr>
+      <tr><td>Government app</td><td>No</td><td></td></tr>
+      <tr><td>Financial features</td><td>None</td><td></td></tr>
+      <tr><td>Health app</td><td>No</td><td></td></tr>
+      <tr><td>Package name</td><td><code>team.whitestudio.browser6.browser6</code></td><td>From android/app/build.gradle.kts. You cannot change it after the first upload.</td></tr>
+    </table>
+  </div>
+
+  <h3>Data safety form</h3>
+  <div class="card table-scroll">
+    <table>
+      <tr><th>Question</th><th>Answer</th></tr>
+      <tr><td>Does your app collect or share any of the required user data types?</td><td><b>No</b>. History, bookmarks, settings and downloads are stored only on the device and never sent to the developer.</td></tr>
+      <tr><td>Is all user data encrypted in transit?</td><td>Not applicable: the app sends no user data to the developer. Web traffic uses HTTPS when the website supports it.</td></tr>
+      <tr><td>Do you provide a way for users to request that their data is deleted?</td><td>Users can delete their own data in the app (History → Clear all, delete bookmarks) or by uninstalling. No data is held on servers.</td></tr>
+    </table>
+    <p class="hint">Websites the user visits and the chosen search engine get the user's requests, as in any browser. This is user-initiated web browsing, not app data collection. The privacy policy below explains this.</p>
+  </div>
+
+  <!-- ============================ MICROSOFT STORE ============================ -->
+  <h2 id="ms">Microsoft Store <small>Partner Center → Apps and games → Store listings</small></h2>
+
+  <div class="note">
+    Microsoft Store policy 10.2.1: an app that browses the web must use the Chromium or Gecko engine and keep it up to date.
+    6browser on Windows uses Chromium (CEF), so it meets this rule. Ship CEF security updates regularly.
+  </div>
+
+  <div class="card">
+    <div class="field" data-max="256">
+      <div class="field-head"><strong>Product name (reserved name)</strong><span class="count"></span><button class="copy">Copy</button></div>
+      <pre class="text">6browser - Fast Web Browser</pre>
+      <p class="hint">If you reserve only "6browser", use that name here.</p>
+    </div>
+
+    <div class="field" data-max="1000">
+      <div class="field-head"><strong>Short description</strong><span class="count"></span><button class="copy">Copy</button></div>
+<pre class="text">A fast, lightweight web browser for Windows, built on Chromium. Clean tabs, a smart address bar, private tabs, bookmarks, history, a downloads manager, dark mode and Chrome themes, with no account, no ads and no clutter.</pre>
+    </div>
+
+    <div class="field" data-max="10000">
+      <div class="field-head"><strong>Description</strong><span class="count"></span><button class="copy">Copy</button></div>
+<pre class="text">6browser is a fast, lightweight web browser for Windows. It is built on Chromium, the engine behind the world's most popular browsers, and wrapped in a clean, simple interface that starts quickly and stays out of your way.
+
+FAST AND LIGHT
+6browser does less, so it can be quicker. There are no news feeds, shopping offers or extra toolbars: just your tabs, the address bar and the web. Pages open fast, scrolling is smooth and the interface responds instantly.
+
+TABS DONE RIGHT
+• Open, close, duplicate and pin tabs
+• Drag tabs to reorder them, middle-click to close
+• Switch tabs with Ctrl+Tab and Ctrl+Shift+Tab
+• Narrow window? The tab strip turns into a compact tab button
+
+A SMART ADDRESS BAR
+• Type a web address or search right away
+• Suggestions from your history as you type
+• A lock icon shows when a site uses a secure connection
+• Bookmark the current page with the star
+
+PRIVATE BROWSING
+• Private tabs (Ctrl+Shift+N) keep no history, and their cookies and site data stay in memory and are never written to disk
+• No account and no sign-in
+• 6browser does not collect analytics and shows no ads. Your data stays on your PC
+
+NEW TAB PAGE
+• A clean start page with a search box
+• Most visited sites and your own shortcuts
+• Add, edit, remove and drag shortcuts into place
+
+BOOKMARKS, HISTORY AND DOWNLOADS
+• Bookmarks bar and a bookmarks manager (Ctrl+Shift+O)
+• Searchable history (Ctrl+H): delete one page or clear it all
+• Downloads manager (Ctrl+J) with progress, Open file and Show in folder
+
+SWITCH FROM ANOTHER BROWSER IN MINUTES
+• Import bookmarks from Google Chrome, Microsoft Edge, Brave and Mozilla Firefox
+• Or import a bookmarks HTML file
+
+MAKE IT YOURS
+• Light, dark or system theme
+• Accent colors
+• Install Chrome themes from the Chrome Web Store, from a .crx file or from an unpacked folder
+• The Windows 11 title bar matches your theme
+
+FOR POWER USERS
+• A full right-click menu: open links in a new or private tab, save or copy links and images, view page source, inspect
+• Developer tools (F12)
+• Keyboard shortcuts: Ctrl+T new tab, Ctrl+W close tab, Ctrl+L address bar, F5 reload, Alt+Left/Right back and forward
+• Choose your search engine (Google, DuckDuckGo or Bing) and home page
+
+6browser is also available for Android.
+
+Questions or ideas? Contact us at info@6arshid.com.</pre>
+      <p class="hint">Note that Chrome extensions are not supported yet, so the text does not mention them.</p>
+    </div>
+
+    <div class="field" data-max="1500">
+      <div class="field-head"><strong>What's new in this version</strong><span class="count"></span><button class="copy">Copy</button></div>
+<pre class="text">First release of 6browser for Windows:
+• Fast Chromium-based browsing with a clean interface
+• Tabs: pin, duplicate, drag to reorder
+• Private tabs, bookmarks, history and a downloads manager
+• Import bookmarks from Chrome, Edge, Brave and Firefox
+• Dark mode, accent colors and Chrome themes</pre>
+    </div>
+  </div>
+
+  <h3>Product features <small>(up to 20, 200 characters each)</small></h3>
+  <div class="card" id="ms-features">
+    <div class="field" data-max="200"><div class="field-head"><strong>1</strong><span class="count"></span><button class="copy">Copy</button></div><pre class="text">Fast, lightweight browsing on the Chromium engine</pre></div>
+    <div class="field" data-max="200"><div class="field-head"><strong>2</strong><span class="count"></span><button class="copy">Copy</button></div><pre class="text">Clean tabs: pin, duplicate, drag to reorder and middle-click to close</pre></div>
+    <div class="field" data-max="200"><div class="field-head"><strong>3</strong><span class="count"></span><button class="copy">Copy</button></div><pre class="text">Smart address bar with search, history suggestions and a security lock</pre></div>
+    <div class="field" data-max="200"><div class="field-head"><strong>4</strong><span class="count"></span><button class="copy">Copy</button></div><pre class="text">Private tabs that keep no history and never write cookies to disk</pre></div>
+    <div class="field" data-max="200"><div class="field-head"><strong>5</strong><span class="count"></span><button class="copy">Copy</button></div><pre class="text">New Tab page with your shortcuts and most visited sites</pre></div>
+    <div class="field" data-max="200"><div class="field-head"><strong>6</strong><span class="count"></span><button class="copy">Copy</button></div><pre class="text">Bookmarks bar and bookmarks manager</pre></div>
+    <div class="field" data-max="200"><div class="field-head"><strong>7</strong><span class="count"></span><button class="copy">Copy</button></div><pre class="text">Searchable browsing history</pre></div>
+    <div class="field" data-max="200"><div class="field-head"><strong>8</strong><span class="count"></span><button class="copy">Copy</button></div><pre class="text">Downloads manager with progress, open file and show in folder</pre></div>
+    <div class="field" data-max="200"><div class="field-head"><strong>9</strong><span class="count"></span><button class="copy">Copy</button></div><pre class="text">Import bookmarks from Chrome, Edge, Brave and Firefox</pre></div>
+    <div class="field" data-max="200"><div class="field-head"><strong>10</strong><span class="count"></span><button class="copy">Copy</button></div><pre class="text">Light and dark mode with accent colors</pre></div>
+    <div class="field" data-max="200"><div class="field-head"><strong>11</strong><span class="count"></span><button class="copy">Copy</button></div><pre class="text">Install Chrome themes from the Chrome Web Store</pre></div>
+    <div class="field" data-max="200"><div class="field-head"><strong>12</strong><span class="count"></span><button class="copy">Copy</button></div><pre class="text">Full right-click menu and developer tools (F12)</pre></div>
+    <div class="field" data-max="200"><div class="field-head"><strong>13</strong><span class="count"></span><button class="copy">Copy</button></div><pre class="text">Keyboard shortcuts for every common action</pre></div>
+    <div class="field" data-max="200"><div class="field-head"><strong>14</strong><span class="count"></span><button class="copy">Copy</button></div><pre class="text">No account, no ads, no analytics</pre></div>
+  </div>
+
+  <h3>Search terms <small>(up to 7)</small></h3>
+  <div class="card">
+    <div class="field">
+      <div class="field-head"><strong>One per line</strong><button class="copy">Copy</button></div>
+<pre class="text">fast browser
+web browser
+lightweight browser
+private browsing
+chromium browser
+internet browser
+tabs</pre>
+    </div>
+  </div>
+
+  <h3>Properties, age rating and other fields</h3>
+  <div class="card table-scroll">
+    <table>
+      <tr><th>Field</th><th>Value</th><th>Notes</th></tr>
+      <tr><td>Category</td><td>Productivity</td><td>"Utilities &amp; tools" also fits. Pick one.</td></tr>
+      <tr><td>Privacy policy URL</td><td><span class="ph">https://www.6arshid.com/6browser/privacy-policy.html</span></td><td>Required for an app with internet access.</td></tr>
+      <tr><td>Website</td><td>https://www.6arshid.com</td><td></td></tr>
+      <tr><td>Support contact</td><td>info@6arshid.com</td><td></td></tr>
+      <tr><td>Copyright and trademark info</td><td>© 2026 6arshid. All rights reserved.</td><td></td></tr>
+      <tr><td>Developed by</td><td>6arshid</td><td></td></tr>
+      <tr><td>Age rating (IARC)</td><td>Answer <b>Yes</b> to unrestricted web access</td><td>Browsers usually get 12+ or higher.</td></tr>
+      <tr><td>Product declarations</td><td>Check "This app has been tested to meet accessibility guidelines" only if you have tested it</td><td>Leave "depends on non-Microsoft drivers or NT services" unchecked.</td></tr>
+      <tr><td>Minimum hardware</td><td>Windows 10 version 1809 or later (Windows 11 recommended), x64, 4 GB RAM</td><td>Builds are x64 only.</td></tr>
+      <tr><td>Recommended hardware</td><td>8 GB RAM</td><td></td></tr>
+      <tr><td>Disk space</td><td>About 500 MB</td><td>The Chromium engine (CEF) is large. Check the size of the actual installer folder.</td></tr>
+      <tr><td>Pricing</td><td>Free</td><td></td></tr>
+      <tr><td>Packaging</td><td>MSIX, or the Inno Setup EXE (installer/6browser.iss) as an "EXE/MSI app"</td><td>An EXE/MSI submission needs a versioned HTTPS download URL and a silent install switch (Inno Setup: <code>/VERYSILENT /SUPPRESSMSGBOXES /NORESTART</code>).</td></tr>
+      <tr><td>Capabilities (MSIX)</td><td><code>internetClient</code>, <code>runFullTrust</code></td><td>runFullTrust is needed for a desktop (Win32) app and must be justified in the submission notes.</td></tr>
+    </table>
+  </div>
+
+  <div class="field" data-max="2000">
+    <div class="field-head"><strong>Notes for certification</strong><span class="count"></span><button class="copy">Copy</button></div>
+<pre class="text">6browser is a desktop web browser built with Flutter on the Chromium Embedded Framework (CEF), so it complies with policy 10.2.1 (Chromium engine). No account or test credentials are needed: open the app and browse any website. runFullTrust is required because it is a Win32 desktop app that hosts the Chromium engine. The app collects no analytics. History, bookmarks and settings are stored locally in the user's profile folder.</pre>
+  </div>
+
+  <!-- ============================ FEATURES ============================ -->
+  <h2 id="features">Feature list <small>verified against the current code</small></h2>
+  <div class="card table-scroll">
+    <table>
+      <tr><th>Feature</th><th>Windows</th><th>Android</th></tr>
+      <tr><td>Multi-tab browsing (new, close, switch)</td><td>✔ Tab strip</td><td>✔ Tab grid</td></tr>
+      <tr><td>Pin, duplicate, drag to reorder tabs</td><td>✔</td><td>Not in the UI</td></tr>
+      <tr><td>Private tabs</td><td>✔ Ctrl+Shift+N (in-memory session)</td><td>Best effort: no history, cache and local storage cleared on close; cookies are not isolated</td></tr>
+      <tr><td>Address bar: search or URL, history suggestions, HTTPS lock</td><td>✔</td><td>✔</td></tr>
+      <tr><td>New Tab page: search, shortcuts, most visited, drag and edit</td><td>✔</td><td>✔</td></tr>
+      <tr><td>Bookmarks (star), bookmarks bar, bookmarks manager</td><td>✔</td><td>✔</td></tr>
+      <tr><td>History: search, delete, clear all</td><td>✔</td><td>✔</td></tr>
+      <tr><td>Downloads manager: progress, open, show in folder</td><td>✔ (no pause/cancel)</td><td>— (the Android engine has no downloads yet)</td></tr>
+      <tr><td>Import from Chrome, Edge, Brave, Firefox profiles</td><td>✔</td><td>—</td></tr>
+      <tr><td>Import bookmarks HTML / JSON file</td><td>✔</td><td>✔</td></tr>
+      <tr><td>Light, dark and system theme; accent colors</td><td>✔</td><td>✔</td></tr>
+      <tr><td>Chrome themes (Web Store, .crx, unpacked)</td><td>✔</td><td>✔</td></tr>
+      <tr><td>Right-click menu, DevTools (F12)</td><td>✔</td><td>—</td></tr>
+      <tr><td>Keyboard shortcuts</td><td>✔</td><td>—</td></tr>
+      <tr><td>Search engine choice (Google, DuckDuckGo, Bing), custom home page</td><td>✔</td><td>✔</td></tr>
+      <tr><td>Phone navigation bar (back, forward, home, tabs, menu)</td><td>—</td><td>✔</td></tr>
+      <tr><td><b>Not supported (do not advertise)</b></td><td colspan="2">Chrome extensions, ad blocking, sync, password manager, reading mode, downloads on Android</td></tr>
+    </table>
+  </div>
+
+  <!-- ============================ ASSETS ============================ -->
+  <h2 id="assets">Images</h2>
+
+  <h3>Google Play: phone screenshots (1080 × 1920, 9:16)</h3>
+  <p class="hint">Upload 2 to 8. The framed versions have captions; plain versions without frames are in screenshots/raw.</p>
+  <div class="card gallery">
+    <a href="screenshots/android/01-new-tab.png"><img src="screenshots/android/01-new-tab.png" alt="">01-new-tab</a>
+    <a href="screenshots/android/02-article.png"><img src="screenshots/android/02-article.png" alt="">02-article</a>
+    <a href="screenshots/android/03-tabs.png"><img src="screenshots/android/03-tabs.png" alt="">03-tabs</a>
+    <a href="screenshots/android/04-menu.png"><img src="screenshots/android/04-menu.png" alt="">04-menu</a>
+    <a href="screenshots/android/05-private.png"><img src="screenshots/android/05-private.png" alt="">05-private</a>
+    <a href="screenshots/android/06-dark.png"><img src="screenshots/android/06-dark.png" alt="">06-dark</a>
+    <a href="screenshots/android/07-bookmarks.png"><img src="screenshots/android/07-bookmarks.png" alt="">07-bookmarks</a>
+    <a href="screenshots/android/08-appearance.png"><img src="screenshots/android/08-appearance.png" alt="">08-appearance</a>
+  </div>
+
+  <h3>Microsoft Store: desktop screenshots (1920 × 1080)</h3>
+  <p class="hint">Upload 1 to 10. Microsoft requires at least 1366 × 768. The plain versions are in screenshots/raw.</p>
+  <div class="card gallery wide">
+    <a href="screenshots/windows/01-new-tab.png"><img src="screenshots/windows/01-new-tab.png" alt="">01-new-tab</a>
+    <a href="screenshots/windows/02-article.png"><img src="screenshots/windows/02-article.png" alt="">02-article</a>
+    <a href="screenshots/windows/03-menu.png"><img src="screenshots/windows/03-menu.png" alt="">03-menu</a>
+    <a href="screenshots/windows/04-context-menu.png"><img src="screenshots/windows/04-context-menu.png" alt="">04-context-menu</a>
+    <a href="screenshots/windows/05-dark.png"><img src="screenshots/windows/05-dark.png" alt="">05-dark</a>
+    <a href="screenshots/windows/06-private.png"><img src="screenshots/windows/06-private.png" alt="">06-private</a>
+    <a href="screenshots/windows/07-history.png"><img src="screenshots/windows/07-history.png" alt="">07-history</a>
+    <a href="screenshots/windows/08-downloads.png"><img src="screenshots/windows/08-downloads.png" alt="">08-downloads</a>
+    <a href="screenshots/windows/09-appearance.png"><img src="screenshots/windows/09-appearance.png" alt="">09-appearance</a>
+    <a href="screenshots/windows/10-settings.png"><img src="screenshots/windows/10-settings.png" alt="">10-settings</a>
+  </div>
+
+  <h3>Store graphics</h3>
+  <div class="card table-scroll">
+    <table>
+      <tr><th>File</th><th>Size</th><th>Where to upload</th></tr>
+      <tr><td><a href="graphics/play-icon-512.png">graphics/play-icon-512.png</a></td><td>512 × 512</td><td>Google Play: App icon (required)</td></tr>
+      <tr><td><a href="graphics/play-feature-graphic-1024x500.png">graphics/play-feature-graphic-1024x500.png</a></td><td>1024 × 500</td><td>Google Play: Feature graphic (required)</td></tr>
+      <tr><td><a href="graphics/msstore-box-art-2160x2160.png">graphics/msstore-box-art-2160x2160.png</a></td><td>2160 × 2160 (1:1)</td><td>Microsoft Store: 1:1 Box art / Store logo</td></tr>
+      <tr><td><a href="graphics/msstore-poster-art-1440x2160.png">graphics/msstore-poster-art-1440x2160.png</a></td><td>1440 × 2160 (2:3)</td><td>Microsoft Store: 2:3 Poster art (recommended for the listing)</td></tr>
+      <tr><td><a href="graphics/msstore-hero-art-1920x1080.png">graphics/msstore-hero-art-1920x1080.png</a></td><td>1920 × 1080 (16:9)</td><td>Microsoft Store: 16:9 Super hero art (optional)</td></tr>
+    </table>
+  </div>
+  <div class="card gallery wide">
+    <a href="graphics/play-feature-graphic-1024x500.png"><img src="graphics/play-feature-graphic-1024x500.png" alt="">Feature graphic</a>
+    <a href="graphics/msstore-hero-art-1920x1080.png"><img src="graphics/msstore-hero-art-1920x1080.png" alt="">Hero art</a>
+  </div>
+  <div class="card gallery">
+    <a href="graphics/play-icon-512.png"><img src="graphics/play-icon-512.png" alt="">Play icon</a>
+    <a href="graphics/msstore-box-art-2160x2160.png"><img src="graphics/msstore-box-art-2160x2160.png" alt="">Box art</a>
+    <a href="graphics/msstore-poster-art-1440x2160.png"><img src="graphics/msstore-poster-art-1440x2160.png" alt="">Poster art</a>
+  </div>
+  <p class="hint">The screenshots show the real app UI. The websites in them are made up and use reserved example.com / .org / .net addresses, so no real brand appears.
+  To regenerate: <code>flutter test tool/store_screenshots/store_screenshots_test.dart</code>, then <code>python tool/store_screenshots/frame.py</code>.</p>
+
+  <!-- ============================ PRIVACY ============================ -->
+  <h2 id="privacy">Privacy policy <small>full page: <a href="privacy-policy.html">privacy-policy.html</a></small></h2>
+  <div class="field">
+    <div class="field-head"><strong>Privacy policy text</strong><button class="copy">Copy</button></div>
+<pre class="text">6browser Privacy Policy
+Last updated: October 16, 2026
+
+6browser ("the app") is a web browser developed by 6arshid ("we"). This policy explains what happens to your information when you use the app on Android and Windows.
+
+1. Information we collect
+We do not collect any personal information. The app has no account system, no analytics, no advertising and no crash reporting that sends data to us.
+
+2. Information stored on your device
+To work as a browser, the app stores the following only on your device:
+• Browsing history, bookmarks, shortcuts and settings
+• The list of your downloads
+• Cookies, cache and website data saved by the web engine
+You can delete this data at any time in the app (for example, History → Clear all) or by uninstalling the app. Private tabs do not save history. On Windows, their cookies and website data are kept in memory only and are removed when the app closes. On Android, the app clears cached website data when a private tab is closed.
+
+3. Websites and search engines
+When you visit a website or search, your request goes directly to that website or to the search engine you chose (Google, DuckDuckGo or Bing). These services may collect information under their own privacy policies. We do not see or receive this traffic. To show site icons, the app loads each site's icon (favicon) from that site.
+
+4. Importing from other browsers (Windows)
+If you choose to import, the app reads bookmarks from other browsers installed on your computer and saves them in 6browser on your device. Nothing is uploaded.
+
+5. Chrome themes
+If you install a theme from the Chrome Web Store, the app downloads the theme file from Google's servers. Google's privacy policy applies to that download.
+
+6. Children
+The app is not directed at children under 13, and we do not knowingly collect information from children.
+
+7. Changes
+If we change this policy, we will update the date above and publish the new version at this address.
+
+8. Contact
+Questions about this policy: info@6arshid.com · www.6arshid.com</pre>
+  </div>
+
+  <!-- ============================ CHECKLIST ============================ -->
+  <h2 id="checklist">Submission checklist</h2>
+  <div class="card">
+    <h3 style="margin-top:0">Google Play</h3>
+    <ul class="check">
+      <li>Create the app in Play Console (name, default language English (US), App, Free)</li>
+      <li>Build a signed App Bundle: <code>flutter build appbundle --release</code> with an upload key (Play needs an .aab, not an .apk)</li>
+      <li>Target the current required API level (check targetSdk in the Gradle build)</li>
+      <li>Main store listing: name, short and full description, icon, feature graphic, 2 to 8 phone screenshots</li>
+      <li>App content: privacy policy, ads (No), app access (all features available without login), content rating, target audience, data safety</li>
+      <li>New personal developer accounts: run a closed test with at least 12 testers for 14 days before production</li>
+    </ul>
+    <h3>Microsoft Store</h3>
+    <ul class="check">
+      <li>Reserve the product name in Partner Center</li>
+      <li>Package as MSIX (signed by the Store) or submit the Inno Setup installer as an EXE app with an HTTPS URL</li>
+      <li>Properties: category, privacy policy URL, website, support contact, system requirements</li>
+      <li>Age ratings questionnaire (IARC)</li>
+      <li>Store listing (English): description, short description, what's new, features, search terms, screenshots, logos</li>
+      <li>Notes for certification (see above), including the runFullTrust justification</li>
+    </ul>
+  </div>
+</main>
+<footer>6browser store listing kit · generated October 16, 2026</footer>
+
+<script>
+  document.querySelectorAll('.field').forEach(function (field) {
+    var text = field.querySelector('.text');
+    var count = field.querySelector('.count');
+    var max = Number(field.dataset.max || 0);
+    if (count && text) {
+      var n = text.textContent.length;
+      count.textContent = max ? n + ' / ' + max : n + ' characters';
+      if (max && n > max) count.classList.add('over');
+    }
+    var btn = field.querySelector('.copy');
+    if (btn && text) {
+      btn.addEventListener('click', function () {
+        var done = function () {
+          btn.textContent = 'Copied';
+          btn.classList.add('done');
+          setTimeout(function () { btn.textContent = 'Copy'; btn.classList.remove('done'); }, 1400);
+        };
+        try {
+          navigator.clipboard.writeText(text.textContent).then(done, fallback);
+        } catch (e) { fallback(); }
+        function fallback() {
+          var r = document.createRange(); r.selectNodeContents(text);
+          var s = getSelection(); s.removeAllRanges(); s.addRange(r);
+          try { document.execCommand('copy'); done(); } catch (e) {}
+        }
+      });
+    }
+  });
+</script>
+</body>
+</html>

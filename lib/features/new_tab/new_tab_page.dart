@@ -26,7 +26,7 @@ class NewTabPage extends ConsumerWidget {
         ? BrowserColors.incognito
         : BrowserColors.of(context);
     final image = view.incognito ? null : colors.ntpImage;
-    return DecoratedBox(
+    final page = DecoratedBox(
       decoration: BoxDecoration(
         color: colors.ntpBackground,
         image: image == null
@@ -87,6 +87,17 @@ class NewTabPage extends ConsumerWidget {
         ),
       ),
     );
+    // Private tabs are dark like their toolbar, so text and the search box
+    // must not take light-theme colors.
+    return view.incognito
+        ? Theme(
+            data: buildTheme(
+              brightness: Brightness.dark,
+              colors: BrowserColors.incognito,
+            ),
+            child: page,
+          )
+        : page;
   }
 }
 
