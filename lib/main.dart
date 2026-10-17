@@ -1,14 +1,33 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'features/settings/app_settings.dart';
+import 'features/settings/factory_reset.dart';
 import 'features/tabs/tabs_controller.dart';
 import 'features/themes/theme_service.dart';
 import 'ui/browser_shell.dart';
 import 'ui/browser_theme.dart';
 
-void main(List<String> args) {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await FactoryResetStore(await getApplicationSupportDirectory())
+        .applyPending();
+  } catch (_) {
+    runApp(
+      const MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: Text(
+              'Factory reset could not finish. Close other 6browser windows and reopen the app to retry.',
+            ),
+          ),
+        ),
+      ),
+    );
+    return;
+  }
   runApp(
     ProviderScope(
       overrides: [

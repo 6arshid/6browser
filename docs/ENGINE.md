@@ -95,6 +95,22 @@ Verified by inspecting the command lines of the running browser6.exe processes.
 therefore unsandboxed; this must be revisited before any public release.
 When upgrading webview_cef, re-apply the patch (search for `6browser patch`).
 
+## Camera and microphone (Windows)
+
+Alloy denies media requests by default. The vendored `WebviewHandler` now
+registers a `CefPermissionHandler` and shows a native Yes/No prompt containing
+the requesting origin and the requested devices. Yes grants precisely the
+requested camera/microphone permissions; No or closing the prompt denies them.
+Decisions are not saved, including in private tabs. Screen capture remains
+unsupported because it needs a source picker. Other platforms retain CEF's
+default behavior.
+
+Manual verification on HTTPS or localhost: request audio only, video only, and
+both with `navigator.mediaDevices.getUserMedia`; verify Yes returns the requested
+tracks, No rejects with `NotAllowedError`, and a subsequent request prompts
+again. Stop the returned tracks after testing. Repeat in a private tab. Windows
+privacy settings must also allow desktop apps to access the devices.
+
 ## Downloads (step 5)
 
 `webview_cef` 0.6.2 has no download handler, so downloads silently did

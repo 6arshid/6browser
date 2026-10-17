@@ -60,6 +60,7 @@ public CefFocusHandler,
 public CefLoadHandler,
 public CefDownloadHandler,
 public CefContextMenuHandler,
+public CefPermissionHandler,
 public CefRenderHandler{
 public:
     //Paint callback (software off-screen rendering)
@@ -101,6 +102,13 @@ public:
     virtual CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
     virtual CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
     virtual CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
+    CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
+    bool OnRequestMediaAccessPermission(
+        CefRefPtr<CefBrowser> browser,
+        CefRefPtr<CefFrame> frame,
+        const CefString& requesting_origin,
+        uint32_t requested_permissions,
+        CefRefPtr<CefMediaAccessCallback> callback) override;
 
     // CefContextMenuHandler methods (6browser patch):
     void OnBeforeContextMenu(CefRefPtr<CefBrowser> browser,

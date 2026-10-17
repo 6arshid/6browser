@@ -58,6 +58,41 @@ WebviewHandler::~WebviewHandler() {
     js_callbacks_.clear();
 }
 
+bool WebviewHandler::OnRequestMediaAccessPermission(
+    CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+    const CefString& requesting_origin, uint32_t requested_permissions,
+    CefRefPtr<CefMediaAccessCallback> callback) {
+    CEF_REQUIRE_UI_THREAD();
+#if defined(OS_WIN)
+    // Alloy's default is to deny silently. Ask for each request rather than
+    // enabling --enable-media-stream, which grants every site access.
+    constexpr uint32_t devices = CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE |
+                                 CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE;
+    // Screen capture requires a source picker and is not a device permission.
+    if (!requested_permissions || (requested_permissions & ~devices)) {
+        callback->Cancel();
+        return true;
+    }
+    std::wstring resources;
+    if (requested_permissions & CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE)
+        resources = L"microphone";
+    if (requested_permissions & CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE) {
+        if (!resources.empty()) resources += L" and ";
+        resources += L"camera";
+    }
+    const std::wstring message = requesting_origin.ToWString() +
+        L"\n\nAllow this site to use your " + resources +
+        L"?\n\nThis permission applies to this request only.";
+    const int result = MessageBoxW(browser->GetHost()->GetWindowHandle(),
+        message.c_str(), L"6browser - Site permission",
+        MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2 | MB_SETFOREGROUND);
+    callback->Continue(result == IDYES ? requested_permissions : 0);
+    return true;
+#else
+    return false;
+#endif
+}
+
 bool WebviewHandler::OnProcessMessageReceived(
     CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
      CefProcessId source_process, CefRefPtr<CefProcessMessage> message)
