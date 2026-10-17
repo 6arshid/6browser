@@ -17,7 +17,7 @@
 #>
 param(
   [string]$IdentityName = '6arshid.6browser',
-  [string]$Publisher = 'CN=6arshid',
+  [string]$Publisher = 'CN=44315FA5-4878-44FB-9167-723357EE983C',
   [string]$PublisherDisplayName = '6arshid',
   [string]$DisplayName = '6browser',
   [string]$Version,
