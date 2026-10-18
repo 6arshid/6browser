@@ -35,7 +35,7 @@ function page({active = true, denied = false, policy = true, secure = true, ifra
     async decode() {}
   }
   const context = {
-    window, top: iframe ? {} : window, isSecureContext: secure,
+    window, top: iframe ? {} : window, isSecureContext: secure, location: {protocol: 'https:'},
     navigator: {mediaDevices: {}, userActivation: {isActive: active}},
     document: {createElement: () => canvas, permissionsPolicy: {allowsFeature: () => policy}},
     HTMLCanvasElement: {prototype: {captureStream() {}}},

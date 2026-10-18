@@ -1,5 +1,5 @@
 (() => {
-  if (!isSecureContext || window !== top || !navigator.mediaDevices ||
+  if (!isSecureContext || location.protocol !== 'https:' || window !== top || !navigator.mediaDevices ||
       navigator.mediaDevices.getDisplayMedia || !window.SixScreenCapture) return;
   const bridge = window.SixScreenCapture;
   let next = 0;

@@ -16,7 +16,9 @@ class ScreenShareBridge(private val activity: MainActivity) {
     fun install(view: WebView) {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) ||
             !WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return
-        WebViewCompat.addWebMessageListener(view, "SixScreenCapture", setOf("https://*")) {
+        // WebKit accepts "*" but not a scheme-only wildcard ("https://*").
+        // Enforce HTTPS and the top-level frame in the authenticated callback.
+        WebViewCompat.addWebMessageListener(view, "SixScreenCapture", setOf("*")) {
                 _, message, origin, mainFrame, reply ->
             if (!mainFrame || origin.scheme != "https") return@addWebMessageListener
             val input = try { JSONObject(message.data ?: "") } catch (_: Exception) {
@@ -55,7 +57,7 @@ class ScreenShareBridge(private val activity: MainActivity) {
             }
         }
         val script = activity.assets.open("screen_share.js").bufferedReader().use { it.readText() }
-        WebViewCompat.addDocumentStartJavaScript(view, script, setOf("https://*"))
+        WebViewCompat.addDocumentStartJavaScript(view, script, setOf("*"))
     }
 
     private fun sameOrigin(url: String?, origin: Uri): Boolean {
