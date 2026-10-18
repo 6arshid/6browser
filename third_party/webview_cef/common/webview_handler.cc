@@ -118,13 +118,34 @@ bool WebviewHandler::OnRequestMediaAccessPermission(
     CefRefPtr<CefMediaAccessCallback> callback) {
     CEF_REQUIRE_UI_THREAD();
 #if defined(OS_WIN)
+    // Alloy's callback captures the entire desktop when no source ID was
+    // supplied. It does NOT open Chrome's source picker. Obtain explicit,
+    // uncached consent for that scope before continuing the request.
+    constexpr uint32_t display = CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE |
+                                 CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE;
+    if ((requested_permissions & CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE) &&
+        !(requested_permissions & ~display)) {
+        std::wstring message = requesting_origin.ToWString() +
+            L"\n\nShare your ENTIRE desktop with this site?"
+            L"\nEverything visible on your screens may be shared, including other apps and notifications.";
+        if (requested_permissions & CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE) {
+            message += L"\nSystem audio will also be shared.";
+        }
+        message += L"\n\nUse the site's Stop presenting / Stop sharing control to stop."
+                   L"\nThis permission applies to this request only.";
+        const bool allowed = MessageBoxW(browser->GetHost()->GetWindowHandle(),
+            message.c_str(), L"6browser - Share entire screen",
+            MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2 | MB_SETFOREGROUND) == IDYES;
+        callback->Continue(allowed ? requested_permissions : 0);
+        return true;
+    }
     // Alloy's default is to deny silently. Ask for each request rather than
     // enabling --enable-media-stream, which grants every site access.
     constexpr uint32_t devices = CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE |
                                  CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE;
     LogPermission(L"media access " + requesting_origin.ToWString() +
                   L" permissions=" + std::to_wstring(requested_permissions));
-    // Screen capture requires a source picker and is not a device permission.
+    // Deny unknown permissions rather than treating them as camera/microphone.
     if (!requested_permissions || (requested_permissions & ~devices)) {
         callback->Cancel();
         return true;

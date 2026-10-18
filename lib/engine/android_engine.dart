@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import 'browser_engine.dart';
 
@@ -42,6 +43,7 @@ class AndroidBrowserView implements BrowserView {
             if (c.url != null) _url.value = c.url!;
           },
           onPageStarted: (u) {
+            _stopScreenShare();
             _url.value = u;
             _isLoading.value = true;
           },
@@ -59,8 +61,7 @@ class AndroidBrowserView implements BrowserView {
       _controller.clearCache();
       _controller.clearLocalStorage();
     }
-    _controller.loadRequest(Uri.parse(initialUrl));
-    _isReady.value = true;
+    _initialize(initialUrl);
   }
 
   @override
@@ -68,13 +69,41 @@ class AndroidBrowserView implements BrowserView {
 
   static const _app = MethodChannel('6browser/app');
 
+  int get _webViewId =>
+      (_controller.platform as AndroidWebViewController).webViewIdentifier;
+
+  Future<void> _initialize(String initialUrl) async {
+    // Wait for native WebView creation before resolving it through the external
+    // Android API on our app channel.
+    await _controller.setJavaScriptMode(JavaScriptMode.unrestricted);
+    if (_disposed) return;
+    try {
+      // Install before navigation so sites see getDisplayMedia during startup.
+      await _app.invokeMethod<void>('installScreenShare', {
+        'webViewId': _webViewId,
+      });
+    } on PlatformException catch (error) {
+      debugPrint('Screen sharing setup failed: ${error.message}');
+    }
+    if (_disposed) return;
+    await _controller.loadRequest(Uri.parse(initialUrl));
+    if (!_disposed) _isReady.value = true;
+  }
+
+  Future<void> _stopScreenShare() async {
+    await _app.invokeMethod<void>('stopScreenShare', {'webViewId': _webViewId});
+  }
+
+  bool _disposed = false;
+
   // Android WebView denies getUserMedia unless the app grants the request.
   // The prompt and the runtime permissions live in MainActivity. The request
   // does not carry its origin, so the current page's origin is shown.
   Future<void> _onPermissionRequest(WebViewPermissionRequest request) async {
     final camera = request.types.contains(WebViewPermissionResourceType.camera);
-    final microphone =
-        request.types.contains(WebViewPermissionResourceType.microphone);
+    final microphone = request.types.contains(
+      WebViewPermissionResourceType.microphone,
+    );
     final onlyMedia = request.types.every(
       (t) =>
           t == WebViewPermissionResourceType.camera ||
@@ -85,7 +114,8 @@ class AndroidBrowserView implements BrowserView {
     final origin = uri != null && uri.hasAuthority ? uri.origin : _url.value;
     bool allowed = false;
     try {
-      allowed = await _app.invokeMethod<bool>('requestMediaAccess', {
+      allowed =
+          await _app.invokeMethod<bool>('requestMediaAccess', {
             'origin': origin,
             'camera': camera,
             'microphone': microphone,
@@ -153,6 +183,8 @@ class AndroidBrowserView implements BrowserView {
 
   @override
   Future<void> dispose() async {
+    _disposed = true;
+    await _stopScreenShare();
     if (incognito) {
       await _controller.clearCache();
       await _controller.clearLocalStorage();

@@ -19,6 +19,7 @@ A desktop web browser with a Flutter UI on top of the Chromium engine (CEF).
 | Persistent profile (cookies, localStorage, cache) | Works on Windows |
 | Incognito tabs (`Ctrl+Shift+N`, or `6browser.exe --incognito [url]`) | Works on Windows, as tabs, not a separate window |
 | Responsive layout (tab strip becomes a tab button below 720 px) | Works |
+| Screen sharing (`getDisplayMedia`) | Windows: entire desktop after confirmation. Android: system screen/app picker, with Stop action in the notification. |
 | **Chrome extensions / Chrome Web Store install** | **Not supported** (Web Store pages show a notice; "Add to Chrome" is disabled to avoid an engine crash) |
 
 Shortcuts: `Ctrl+T` new tab, `Ctrl+W` close, `Ctrl+Shift+N` incognito tab,
@@ -26,6 +27,14 @@ Shortcuts: `Ctrl+T` new tab, `Ctrl+W` close, `Ctrl+Shift+N` incognito tab,
 reload, `F12` DevTools.
 
 ## Limitations
+
+- **Screen sharing:** Windows uses CEF's full-desktop capture, with an explicit
+  prompt for every request; there is no desktop window/tab picker. Android uses
+  MediaProjection and a video-only canvas bridge (up to 1280 px, 10 fps); system
+  audio is not captured. Android requires a current System WebView supporting
+  document-start scripts and web messages. Capture stops on navigation, tab close,
+  the site's stop control, or Android's Stop sharing action. Real Google Meet
+  calls still need device validation; successful builds alone do not verify them.
 
 - **No extensions.** The engine layer (`webview_cef`) renders off-screen, and
   CEF only supports Chrome extensions in windowed Chrome-style browsers. Getting
