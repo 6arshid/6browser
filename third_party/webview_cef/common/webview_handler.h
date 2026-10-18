@@ -109,6 +109,12 @@ public:
         const CefString& requesting_origin,
         uint32_t requested_permissions,
         CefRefPtr<CefMediaAccessCallback> callback) override;
+    bool OnShowPermissionPrompt(
+        CefRefPtr<CefBrowser> browser,
+        uint64_t prompt_id,
+        const CefString& requesting_origin,
+        uint32_t requested_permissions,
+        CefRefPtr<CefPermissionPromptCallback> callback) override;
 
     // CefContextMenuHandler methods (6browser patch):
     void OnBeforeContextMenu(CefRefPtr<CefBrowser> browser,

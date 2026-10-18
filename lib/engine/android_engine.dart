@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import 'browser_engine.dart';
@@ -33,7 +34,7 @@ class AndroidEngine implements BrowserEngine {
 class AndroidBrowserView implements BrowserView {
   AndroidBrowserView(String initialUrl, {this.incognito = false}) {
     _url.value = initialUrl;
-    _controller = WebViewController()
+    _controller = WebViewController(onPermissionRequest: _onPermissionRequest)
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
         NavigationDelegate(
@@ -64,6 +65,37 @@ class AndroidBrowserView implements BrowserView {
 
   @override
   final bool incognito;
+
+  static const _app = MethodChannel('6browser/app');
+
+  // Android WebView denies getUserMedia unless the app grants the request.
+  // The prompt and the runtime permissions live in MainActivity. The request
+  // does not carry its origin, so the current page's origin is shown.
+  Future<void> _onPermissionRequest(WebViewPermissionRequest request) async {
+    final camera = request.types.contains(WebViewPermissionResourceType.camera);
+    final microphone =
+        request.types.contains(WebViewPermissionResourceType.microphone);
+    final onlyMedia = request.types.every(
+      (t) =>
+          t == WebViewPermissionResourceType.camera ||
+          t == WebViewPermissionResourceType.microphone,
+    );
+    if (!onlyMedia || !(camera || microphone)) return request.deny();
+    final uri = Uri.tryParse(_url.value);
+    final origin = uri != null && uri.hasAuthority ? uri.origin : _url.value;
+    bool allowed = false;
+    try {
+      allowed = await _app.invokeMethod<bool>('requestMediaAccess', {
+            'origin': origin,
+            'camera': camera,
+            'microphone': microphone,
+          }) ??
+          false;
+    } on PlatformException {
+      allowed = false;
+    }
+    return allowed ? request.grant() : request.deny();
+  }
 
   late final WebViewController _controller;
   final _url = ValueNotifier<String>('');

@@ -10,6 +10,7 @@
 #include <chrono>
 #include <unordered_map>
 #include <cstdint>
+#include <cstdio>
 
 #include "include/base/cef_callback.h"
 #include "include/cef_app.h"
@@ -58,6 +59,59 @@ WebviewHandler::~WebviewHandler() {
     js_callbacks_.clear();
 }
 
+#if defined(OS_WIN)
+namespace {
+// CEF may ask about one getUserMedia call twice: OnShowPermissionPrompt
+// (Chrome's permission layer) and OnRequestMediaAccessPermission (device
+// access). Both must be granted, so a "Yes" is reused for a few seconds for
+// the same origin and devices instead of prompting twice.
+struct RecentMediaGrant {
+    std::wstring origin;
+    bool audio = false;
+    bool video = false;
+    std::chrono::steady_clock::time_point at;
+};
+RecentMediaGrant recent_media_grant_;
+
+void LogPermission(const std::wstring& line) {
+    wchar_t temp[MAX_PATH];
+    if (!GetTempPathW(MAX_PATH, temp)) return;
+    const std::wstring path = std::wstring(temp) + L"6browser-permissions.log";
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, path.c_str(), L"a, ccs=UTF-8") != 0) return;
+    if (!f) return;
+    fwprintf(f, L"%ls\n", line.c_str());
+    fclose(f);
+}
+
+bool AskMediaPermission(CefRefPtr<CefBrowser> browser, const std::wstring& origin,
+                        bool audio, bool video) {
+    const auto now = std::chrono::steady_clock::now();
+    if (recent_media_grant_.origin == origin &&
+        (!audio || recent_media_grant_.audio) &&
+        (!video || recent_media_grant_.video) &&
+        now - recent_media_grant_.at < std::chrono::seconds(10)) {
+        return true;
+    }
+    std::wstring resources;
+    if (audio) resources = L"microphone";
+    if (video) {
+        if (!resources.empty()) resources += L" and ";
+        resources += L"camera";
+    }
+    const std::wstring message = origin +
+        L"\n\nAllow this site to use your " + resources +
+        L"?\n\nThis permission applies to this request only.";
+    const int result = MessageBoxW(browser->GetHost()->GetWindowHandle(),
+        message.c_str(), L"6browser - Site permission",
+        MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2 | MB_SETFOREGROUND);
+    if (result != IDYES) return false;
+    recent_media_grant_ = {origin, audio, video, std::chrono::steady_clock::now()};
+    return true;
+}
+}  // namespace
+#endif
+
 bool WebviewHandler::OnRequestMediaAccessPermission(
     CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
     const CefString& requesting_origin, uint32_t requested_permissions,
@@ -68,25 +122,44 @@ bool WebviewHandler::OnRequestMediaAccessPermission(
     // enabling --enable-media-stream, which grants every site access.
     constexpr uint32_t devices = CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE |
                                  CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE;
+    LogPermission(L"media access " + requesting_origin.ToWString() +
+                  L" permissions=" + std::to_wstring(requested_permissions));
     // Screen capture requires a source picker and is not a device permission.
     if (!requested_permissions || (requested_permissions & ~devices)) {
         callback->Cancel();
         return true;
     }
-    std::wstring resources;
-    if (requested_permissions & CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE)
-        resources = L"microphone";
-    if (requested_permissions & CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE) {
-        if (!resources.empty()) resources += L" and ";
-        resources += L"camera";
+    const bool allowed = AskMediaPermission(browser, requesting_origin.ToWString(),
+        requested_permissions & CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE,
+        requested_permissions & CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE);
+    LogPermission(allowed ? L"  -> allowed" : L"  -> denied");
+    callback->Continue(allowed ? requested_permissions : 0);
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool WebviewHandler::OnShowPermissionPrompt(
+    CefRefPtr<CefBrowser> browser, uint64_t prompt_id,
+    const CefString& requesting_origin, uint32_t requested_permissions,
+    CefRefPtr<CefPermissionPromptCallback> callback) {
+    CEF_REQUIRE_UI_THREAD();
+#if defined(OS_WIN)
+    // With Alloy style the default is IGNORE, which also blocks getUserMedia.
+    constexpr uint32_t devices = CEF_PERMISSION_TYPE_CAMERA_STREAM |
+                                 CEF_PERMISSION_TYPE_MIC_STREAM;
+    LogPermission(L"prompt " + requesting_origin.ToWString() +
+                  L" permissions=" + std::to_wstring(requested_permissions));
+    if (!requested_permissions || (requested_permissions & ~devices)) {
+        return false;
     }
-    const std::wstring message = requesting_origin.ToWString() +
-        L"\n\nAllow this site to use your " + resources +
-        L"?\n\nThis permission applies to this request only.";
-    const int result = MessageBoxW(browser->GetHost()->GetWindowHandle(),
-        message.c_str(), L"6browser - Site permission",
-        MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2 | MB_SETFOREGROUND);
-    callback->Continue(result == IDYES ? requested_permissions : 0);
+    const bool allowed = AskMediaPermission(browser, requesting_origin.ToWString(),
+        requested_permissions & CEF_PERMISSION_TYPE_MIC_STREAM,
+        requested_permissions & CEF_PERMISSION_TYPE_CAMERA_STREAM);
+    LogPermission(allowed ? L"  -> allowed" : L"  -> denied");
+    callback->Continue(allowed ? CEF_PERMISSION_RESULT_ACCEPT
+                               : CEF_PERMISSION_RESULT_DENY);
     return true;
 #else
     return false;
