@@ -225,3 +225,39 @@ profile for name/icon/popup), popups as small CEF child browsers
 (`chrome-extension://<id>/<popup>`; active-tab context and badge text are not
 available that way), and routing extension-created tabs into Flutter tabs.
 Still untested: Web Store "Add to Chrome" in Chrome style (needs a manual click).
+
+## Proprietary codecs: YouTube live (2026-10-19)
+
+YouTube live streams showed "Your browser can't play this video". Live streams
+are served only as H.264 video with AAC audio (there is no Opus track for
+live), and the CEF builds from the Spotify CDN are built without proprietary
+codecs, so MSE rejects them. Normal videos still play (VP9/AV1 + Opus).
+
+There is no runtime switch: CEF must be built from source with
+`proprietary_codecs=true ffmpeg_branding=Chrome`. (CEF issue #3559, using only
+the OS decoders, works for H.264 on Windows but still has no AAC decoder.)
+
+- Build setup lives in `E:\cef_build` (`build.bat` + `retry.sh`): CEF branch
+  7827, commit `2f1bfd8` (same as the CDN version), Chromium source from the
+  official tarball `chromium-149.0.7827.156.tar.xz` (git fetches from
+  googlesource kept failing on this network), `--minimal-distrib-only`.
+  Needs the Windows SDK "Debugging Tools" (installed) and VS Build Tools on E:.
+- Finished distribution goes to `E:\6browser-cef\cef_codecs`. The plugin uses
+  it when the `CEF_CUSTOM_DISTRIB` environment variable points to it (a
+  directory, archive or URL); `scripts/build_windows.ps1` and
+  `scripts/build_msix.ps1` set it automatically when that folder exists.
+  Delete `third_party/webview_cef/third/cef/version.txt` to force a re-copy.
+- Licensing: shipping a software H.264/AAC decoder in a distributed app can
+  require patent licences (Via LA). This is the publisher's decision; the CDN
+  build stays the default for anyone without the custom distribution.
+
+## Keyboard shortcuts (2026-10-19)
+
+Chrome's shortcuts are listed once in `lib/ui/browser_commands.dart` and run by
+the shell; the main menu and the "Keyboard shortcuts" page read their labels
+from there. On Windows the plugin hands keys to CEF from the window procedure
+*and* Flutter sees them, so the page also receives e.g. Esc. The plugin was
+extended (`stopLoad`, `reloadIgnoreCache`, `zoom` with the resulting level
+reported per site, `find`/`stopFinding` with `CefFindHandler` results, and
+`print`) for find in page, zoom, hard reload, stop and print. Not available on
+the Android WebView backend (`supportsPageTools` is false).

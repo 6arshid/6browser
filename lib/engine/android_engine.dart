@@ -167,9 +167,32 @@ class AndroidBrowserView implements BrowserView {
   @override
   Future<void> stop() async {}
 
+  @override
+  Future<void> reloadIgnoringCache() => _controller.reload();
+
   // No DevTools on the Android WebView backend.
   @override
   Future<void> openDevTools() async {}
+
+  // webview_flutter has no zoom, find or print API; pinch-zoom still works.
+  @override
+  bool get supportsPageTools => false;
+  @override
+  ValueListenable<double> get zoom => const _Fixed(1.0);
+  @override
+  Future<void> zoomStep(int direction) async {}
+  @override
+  Future<void> find(
+    String text, {
+    bool forward = true,
+    bool findNext = false,
+  }) async {}
+  @override
+  Future<void> stopFinding() async {}
+  @override
+  ValueListenable<FindResult> get findResult => const _Fixed(FindResult.none);
+  @override
+  Future<void> printPage() async {}
 
   // The Android WebView shows its own long-press text selection menu.
   @override
@@ -190,4 +213,16 @@ class AndroidBrowserView implements BrowserView {
       await _controller.clearLocalStorage();
     }
   }
+}
+
+/// A listenable that never changes.
+class _Fixed<T> implements ValueListenable<T> {
+  const _Fixed(this.value);
+
+  @override
+  final T value;
+  @override
+  void addListener(VoidCallback listener) {}
+  @override
+  void removeListener(VoidCallback listener) {}
 }

@@ -61,6 +61,7 @@ public CefLoadHandler,
 public CefDownloadHandler,
 public CefContextMenuHandler,
 public CefPermissionHandler,
+public CefFindHandler,
 public CefRenderHandler{
 public:
     //Paint callback (software off-screen rendering)
@@ -85,6 +86,8 @@ public:
     std::function<void(int browserId, std::string url)> onLoadEnd;
     // 6browser patch: a page asked for a context menu.
     std::function<void(int browserId, const context_menu_info& info)> onContextMenuEvent;
+    std::function<void(int browserId, int count, int activeMatch, bool finalUpdate)> onFindResultEvent;
+    std::function<void(int browserId, double level)> onZoomChangedEvent;
     
     explicit WebviewHandler();
     ~WebviewHandler();
@@ -103,6 +106,14 @@ public:
     virtual CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
     virtual CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
     CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
+    CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
+    // 6browser patch: find-in-page results (Ctrl+F).
+    void OnFindResult(CefRefPtr<CefBrowser> browser,
+                      int identifier,
+                      int count,
+                      const CefRect& selectionRect,
+                      int activeMatchOrdinal,
+                      bool finalUpdate) override;
     bool OnRequestMediaAccessPermission(
         CefRefPtr<CefBrowser> browser,
         CefRefPtr<CefFrame> frame,
@@ -238,6 +249,16 @@ public:
     // |command|: undo, redo, cut, copy, paste, delete, selectAll.
     void editCommand(int browserId, const std::string& command);
     void startDownload(int browserId, const std::string& url);
+    // 6browser patch: browser keyboard shortcuts.
+    void stopLoad(int browserId);
+    void reloadIgnoreCache(int browserId);
+    // |command|: -1 zoom out, 0 reset, 1 zoom in (Chrome's preset steps).
+    // The resulting level is reported through onZoomChangedEvent.
+    void zoom(int browserId, int command);
+    void reportZoom(CefRefPtr<CefBrowser> browser);
+    void find(int browserId, const std::string& text, bool forward, bool matchCase, bool findNext);
+    void stopFinding(int browserId, bool clearSelection);
+    void print(int browserId);
 
     void imeSetComposition(int browserId, std::string text);
     void imeCommitText(int browserId, std::string text);

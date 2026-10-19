@@ -51,9 +51,7 @@ class ChromiumReader {
       }
     } else if (type == 'folder' && node['children'] is List) {
       final name = node['name'] as String?;
-      final child = (folder == null || folder.isEmpty)
-          ? name
-          : '$folder/$name';
+      final child = (folder == null || folder.isEmpty) ? name : '$folder/$name';
       for (final c in node['children'] as List) {
         if (c is Map) _walk(c, child, out);
       }

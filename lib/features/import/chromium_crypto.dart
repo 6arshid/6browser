@@ -82,26 +82,24 @@ final class _DataBlob extends Struct {
   external Pointer<Uint8> pbData;
 }
 
-typedef _CryptUnprotectC =
-    Int32 Function(
-      Pointer<_DataBlob> pDataIn,
-      Pointer<Pointer<Utf16>> ppszDataDescr,
-      Pointer<_DataBlob> pOptionalEntropy,
-      Pointer<Void> pvReserved,
-      Pointer<Void> pPromptStruct,
-      Uint32 dwFlags,
-      Pointer<_DataBlob> pDataOut,
-    );
-typedef _CryptUnprotectDart =
-    int Function(
-      Pointer<_DataBlob> pDataIn,
-      Pointer<Pointer<Utf16>> ppszDataDescr,
-      Pointer<_DataBlob> pOptionalEntropy,
-      Pointer<Void> pvReserved,
-      Pointer<Void> pPromptStruct,
-      int dwFlags,
-      Pointer<_DataBlob> pDataOut,
-    );
+typedef _CryptUnprotectC = Int32 Function(
+  Pointer<_DataBlob> pDataIn,
+  Pointer<Pointer<Utf16>> ppszDataDescr,
+  Pointer<_DataBlob> pOptionalEntropy,
+  Pointer<Void> pvReserved,
+  Pointer<Void> pPromptStruct,
+  Uint32 dwFlags,
+  Pointer<_DataBlob> pDataOut,
+);
+typedef _CryptUnprotectDart = int Function(
+  Pointer<_DataBlob> pDataIn,
+  Pointer<Pointer<Utf16>> ppszDataDescr,
+  Pointer<_DataBlob> pOptionalEntropy,
+  Pointer<Void> pvReserved,
+  Pointer<Void> pPromptStruct,
+  int dwFlags,
+  Pointer<_DataBlob> pDataOut,
+);
 
 typedef _LocalFreeC = Pointer<Void> Function(Pointer<Void> hMem);
 typedef _LocalFreeDart = Pointer<Void> Function(Pointer<Void> hMem);

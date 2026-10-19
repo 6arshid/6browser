@@ -415,6 +415,7 @@ void WebviewHandler::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame
     // and Chrome's Web Store install API crashes the browser process inside
     // libcef. The API is added by Chrome's bindings after the page context is
     // created, so remove it once the Web Store page has loaded.
+    if (frame->IsMain()) reportZoom(browser);
     const std::string loaded = frame->GetURL().ToString();
     if (loaded.rfind("https://chromewebstore.google.com/", 0) == 0 ||
         loaded.rfind("https://chrome.google.com/webstore", 0) == 0) {
@@ -714,6 +715,57 @@ void WebviewHandler::editCommand(int browserId, const std::string& command) {
     else if (command == "paste") frame->Paste();
     else if (command == "delete") frame->Delete();
     else if (command == "selectAll") frame->SelectAll();
+}
+
+void WebviewHandler::stopLoad(int browserId) {
+    auto it = browser_map_.find(browserId);
+    if (it != browser_map_.end()) it->second.browser->StopLoad();
+}
+
+void WebviewHandler::reloadIgnoreCache(int browserId) {
+    auto it = browser_map_.find(browserId);
+    if (it != browser_map_.end()) it->second.browser->ReloadIgnoreCache();
+}
+
+void WebviewHandler::zoom(int browserId, int command) {
+    if (!CefCurrentlyOn(TID_UI)) {
+        CefPostTask(TID_UI, base::BindOnce(&WebviewHandler::zoom, this, browserId, command));
+        return;
+    }
+    auto it = browser_map_.find(browserId);
+    if (it == browser_map_.end()) return;
+    auto host = it->second.browser->GetHost();
+    host->Zoom(command < 0 ? CEF_ZOOM_COMMAND_OUT
+               : command > 0 ? CEF_ZOOM_COMMAND_IN
+                             : CEF_ZOOM_COMMAND_RESET);
+    reportZoom(it->second.browser);
+}
+
+// Chromium keeps zoom per site, so the level can also change on navigation.
+void WebviewHandler::reportZoom(CefRefPtr<CefBrowser> browser) {
+    if (onZoomChangedEvent) {
+        onZoomChangedEvent(browser->GetIdentifier(), browser->GetHost()->GetZoomLevel());
+    }
+}
+
+void WebviewHandler::find(int browserId, const std::string& text, bool forward, bool matchCase, bool findNext) {
+    auto it = browser_map_.find(browserId);
+    if (it != browser_map_.end()) it->second.browser->GetHost()->Find(text, forward, matchCase, findNext);
+}
+
+void WebviewHandler::stopFinding(int browserId, bool clearSelection) {
+    auto it = browser_map_.find(browserId);
+    if (it != browser_map_.end()) it->second.browser->GetHost()->StopFinding(clearSelection);
+}
+
+void WebviewHandler::print(int browserId) {
+    auto it = browser_map_.find(browserId);
+    if (it != browser_map_.end()) it->second.browser->GetHost()->Print();
+}
+
+void WebviewHandler::OnFindResult(CefRefPtr<CefBrowser> browser, int identifier, int count,
+                                  const CefRect& selectionRect, int activeMatchOrdinal, bool finalUpdate) {
+    if (onFindResultEvent) onFindResultEvent(browser->GetIdentifier(), count, activeMatchOrdinal, finalUpdate);
 }
 
 void WebviewHandler::startDownload(int browserId, const std::string& url) {

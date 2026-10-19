@@ -309,6 +309,44 @@ namespace webview_cef {
                 }
             };
 
+            m_handler->onFindResultEvent = [=, this](int nBrowserId, int count, int activeMatch, bool finalUpdate)
+            {
+                if (m_invokeFunc)
+                {
+                    WValue* retMap = webview_value_new_map();
+                    WValue* bId = webview_value_new_int(nBrowserId);
+                    WValue* c = webview_value_new_int(count);
+                    WValue* a = webview_value_new_int(activeMatch);
+                    WValue* f = webview_value_new_bool(finalUpdate);
+                    webview_value_set_string(retMap, "browserId", bId);
+                    webview_value_set_string(retMap, "count", c);
+                    webview_value_set_string(retMap, "activeMatch", a);
+                    webview_value_set_string(retMap, "finalUpdate", f);
+                    m_invokeFunc("onFindResult", retMap);
+                    webview_value_unref(bId);
+                    webview_value_unref(c);
+                    webview_value_unref(a);
+                    webview_value_unref(f);
+                    webview_value_unref(retMap);
+                }
+            };
+
+            m_handler->onZoomChangedEvent = [=, this](int nBrowserId, double level)
+            {
+                if (m_invokeFunc)
+                {
+                    WValue* retMap = webview_value_new_map();
+                    WValue* bId = webview_value_new_int(nBrowserId);
+                    WValue* l = webview_value_new_double(level);
+                    webview_value_set_string(retMap, "browserId", bId);
+                    webview_value_set_string(retMap, "level", l);
+                    m_invokeFunc("onZoomChanged", retMap);
+                    webview_value_unref(bId);
+                    webview_value_unref(l);
+                    webview_value_unref(retMap);
+                }
+            };
+
 			m_init = true;
 		}
 	}
@@ -326,6 +364,8 @@ namespace webview_cef {
 		m_handler->onFocusedNodeChangeMessage = nullptr;
 		m_handler->onImeCompositionRangeChangedMessage = nullptr;
 		m_handler->onContextMenuEvent = nullptr;
+		m_handler->onFindResultEvent = nullptr;
+		m_handler->onZoomChangedEvent = nullptr;
 		m_init = false;
 	}
 
@@ -430,6 +470,39 @@ namespace webview_cef {
 			int browserId = int(webview_value_get_int(webview_value_get_list_value(values, 0)));
 			const auto url = webview_value_get_string(webview_value_get_list_value(values, 1));
 			if (url != nullptr) m_handler->startDownload(browserId, url);
+			result(1, nullptr);
+		}
+		else if (name.compare("stopLoad") == 0) {
+			m_handler->stopLoad(int(webview_value_get_int(values)));
+			result(1, nullptr);
+		}
+		else if (name.compare("reloadIgnoreCache") == 0) {
+			m_handler->reloadIgnoreCache(int(webview_value_get_int(values)));
+			result(1, nullptr);
+		}
+		else if (name.compare("print") == 0) {
+			m_handler->print(int(webview_value_get_int(values)));
+			result(1, nullptr);
+		}
+		else if (name.compare("zoom") == 0) {
+			int browserId = int(webview_value_get_int(webview_value_get_list_value(values, 0)));
+			int command = int(webview_value_get_int(webview_value_get_list_value(values, 1)));
+			m_handler->zoom(browserId, command);
+			result(1, nullptr);
+		}
+		else if (name.compare("find") == 0) {
+			int browserId = int(webview_value_get_int(webview_value_get_list_value(values, 0)));
+			const auto text = webview_value_get_string(webview_value_get_list_value(values, 1));
+			bool forward = webview_value_get_bool(webview_value_get_list_value(values, 2));
+			bool matchCase = webview_value_get_bool(webview_value_get_list_value(values, 3));
+			bool findNext = webview_value_get_bool(webview_value_get_list_value(values, 4));
+			if (text != nullptr) m_handler->find(browserId, text, forward, matchCase, findNext);
+			result(1, nullptr);
+		}
+		else if (name.compare("stopFinding") == 0) {
+			int browserId = int(webview_value_get_int(webview_value_get_list_value(values, 0)));
+			bool clearSelection = webview_value_get_bool(webview_value_get_list_value(values, 1));
+			m_handler->stopFinding(browserId, clearSelection);
 			result(1, nullptr);
 		}
 		else if (name.compare("openDevTools") == 0) {			

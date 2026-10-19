@@ -32,6 +32,17 @@ endif()
 string(REPLACE "+" "%2B" cef_prebuilt_url_name "${cef_prebuilt_version}")
 set(cef_prebuilt_path "${CEF_CDN}/${cef_prebuilt_url_name}")
 
+# 6browser patch: CEF_CUSTOM_DISTRIB may name a CEF binary distribution built
+# from source (a directory, a local archive or a URL), e.g. one built with
+# proprietary codecs (H.264/AAC) for YouTube live streams. The CDN builds
+# leave those codecs out. See docs/ENGINE.md.
+if(DEFINED ENV{CEF_CUSTOM_DISTRIB} AND NOT "$ENV{CEF_CUSTOM_DISTRIB}" STREQUAL "")
+    file(TO_CMAKE_PATH "$ENV{CEF_CUSTOM_DISTRIB}" cef_prebuilt_path)
+    get_filename_component(_cef_custom_name "${cef_prebuilt_path}" NAME)
+    set(cef_prebuilt_version "custom:${_cef_custom_name}")
+    message(WARNING "Using custom CEF distribution ${cef_prebuilt_path}")
+endif()
+
 
 function(extract_file filename extract_dir)
     message(WARNING "${filename} will extract to ${extract_dir} ...")
@@ -88,9 +99,17 @@ function(prepare_prebuilt_files filepath)
         file(REMOVE_RECURSE ${filepath}/cmake ${filepath}/Debug ${filepath}/Release ${filepath}/Resources ${filepath}/libcef_dll ${filepath}/libcef_dll_wrapper ${filepath}/include)
         # Also remove the legacy lower-case layout from the old custom Windows package.
         file(REMOVE_RECURSE ${filepath}/debug ${filepath}/release ${filepath}/resources)
-        download_file(${cef_prebuilt_path} ${CMAKE_CURRENT_SOURCE_DIR}/prebuilt.zip)
         file(MAKE_DIRECTORY ${filepath})
-        extract_file(${CMAKE_CURRENT_SOURCE_DIR}/prebuilt.zip ${filepath})
+        if(IS_DIRECTORY "${cef_prebuilt_path}")
+            file(INSTALL "${cef_prebuilt_path}/" DESTINATION ${filepath})
+        else()
+            if(EXISTS "${cef_prebuilt_path}")
+                file(COPY_FILE "${cef_prebuilt_path}" ${CMAKE_CURRENT_SOURCE_DIR}/prebuilt.zip)
+            else()
+                download_file(${cef_prebuilt_path} ${CMAKE_CURRENT_SOURCE_DIR}/prebuilt.zip)
+            endif()
+            extract_file(${CMAKE_CURRENT_SOURCE_DIR}/prebuilt.zip ${filepath})
+        endif()
 
         ## Needed for making it run on arm64 Linux (makes it check for arm64 or aarch64 instead of just arm64)
         if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

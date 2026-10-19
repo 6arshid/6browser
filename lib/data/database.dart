@@ -140,8 +140,9 @@ class AppDatabase extends _$AppDatabase {
     if (items.isEmpty) return 0;
     final now = DateTime.now();
     final existing = <String>{
-      for (final r
-          in await (selectOnly(bookmarks)..addColumns([bookmarks.url])).get())
+      for (final r in await (selectOnly(
+        bookmarks,
+      )..addColumns([bookmarks.url])).get())
         r.read(bookmarks.url)!,
     };
     // De-dupe within the incoming batch, too.

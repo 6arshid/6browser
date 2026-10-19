@@ -15,6 +15,13 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
+# CEF with proprietary codecs (H.264/AAC, needed for YouTube live), built from
+# source; see docs/ENGINE.md. Without it the CDN build (no H.264/AAC) is used.
+if (-not $env:CEF_CUSTOM_DISTRIB -and (Test-Path 'E:\6browser-cef\cef_codecs')) {
+  $env:CEF_CUSTOM_DISTRIB = 'E:\6browser-cef\cef_codecs'
+}
+if ($env:CEF_CUSTOM_DISTRIB) { Write-Host "CEF: $env:CEF_CUSTOM_DISTRIB" }
+
 flutter build windows --release
 if ($LASTEXITCODE -ne 0) { throw 'flutter build failed' }
 

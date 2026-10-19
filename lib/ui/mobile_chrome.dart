@@ -111,14 +111,13 @@ class TabCountIcon extends StatelessWidget {
 
 /// The phone menu: the current page with quick actions on top, then a grid
 /// of everything else.
-Future<void> showMobileMenu(BuildContext context) =>
-    showModalBottomSheet<void>(
-      context: context,
-      useSafeArea: true,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (_) => const _MobileMenu(),
-    );
+Future<void> showMobileMenu(BuildContext context) => showModalBottomSheet<void>(
+  context: context,
+  useSafeArea: true,
+  showDragHandle: true,
+  isScrollControlled: true,
+  builder: (_) => const _MobileMenu(),
+);
 
 class _MobileMenu extends ConsumerWidget {
   const _MobileMenu();
@@ -458,13 +457,12 @@ class _TabSwitcherPageState extends ConsumerState<TabSwitcherPage> {
               ? _EmptyTabs(private: _private)
               : GridView.builder(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
-                  gridDelegate:
-                      const SliverGridDelegateWithMaxCrossAxisExtent(
-                        maxCrossAxisExtent: 220,
-                        childAspectRatio: 0.78,
-                        mainAxisSpacing: 12,
-                        crossAxisSpacing: 12,
-                      ),
+                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: 220,
+                    childAspectRatio: 0.78,
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 12,
+                  ),
                   itemCount: shown.length,
                   itemBuilder: (_, i) {
                     final t = shown[i];

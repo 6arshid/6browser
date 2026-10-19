@@ -33,8 +33,38 @@ class FakeView implements BrowserView {
   Future<void> reload() async => reloads++;
   @override
   Future<void> stop() async {}
+  int hardReloads = 0;
+  @override
+  Future<void> reloadIgnoringCache() async => hardReloads++;
   @override
   Future<void> openDevTools() async {}
+  @override
+  bool get supportsPageTools => true;
+  @override
+  final ValueNotifier<double> zoom = ValueNotifier(1);
+  @override
+  Future<void> zoomStep(int direction) async => zoom.value = direction == 0
+      ? 1
+      : zoom.value * (direction > 0 ? 1.1 : 1 / 1.1);
+  final finds = <String>[];
+  @override
+  Future<void> find(
+    String text, {
+    bool forward = true,
+    bool findNext = false,
+  }) async {
+    finds.add('${forward ? '>' : '<'}${findNext ? '+' : ''}$text');
+    findResult.value = FindResult(count: 3, active: forward ? 1 : 3);
+  }
+
+  bool findStopped = false;
+  @override
+  Future<void> stopFinding() async => findStopped = true;
+  @override
+  final ValueNotifier<FindResult> findResult = ValueNotifier(FindResult.none);
+  int prints = 0;
+  @override
+  Future<void> printPage() async => prints++;
   final contextMenuController = StreamController<PageContextMenu>.broadcast();
   final editCommands = <EditCommand>[];
   final downloads = <String>[];

@@ -59,6 +59,8 @@ class WindowCaption {
   }
 
   /// The runner's top-level window in this process.
+  static int findWindow() => _hwnd ??= _findWindow();
+
   static int _findWindow() {
     final findWindowEx = _user32
         .lookupFunction<

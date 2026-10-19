@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' show pow;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -52,6 +53,10 @@ class CefBrowserView implements BrowserView {
         onLoadStart: (_, _) => _isLoading.value = true,
         onLoadEnd: (_, _) => _isLoading.value = false,
         onContextMenu: (m) => _contextMenus.add(_toPageMenu(m)),
+        onFindResult: (count, active, _) =>
+            _findResult.value = FindResult(count: count, active: active),
+        // Chromium zoom level: each step is a factor of 1.2.
+        onZoomChanged: (level) => _zoom.value = pow(1.2, level).toDouble(),
       ),
     );
     _url.value = initialUrl;
@@ -68,6 +73,8 @@ class CefBrowserView implements BrowserView {
   final _isLoading = ValueNotifier<bool>(false);
   final _isReady = ValueNotifier<bool>(false);
   final _contextMenus = StreamController<PageContextMenu>.broadcast();
+  final _zoom = ValueNotifier<double>(1);
+  final _findResult = ValueNotifier<FindResult>(FindResult.none);
 
   @override
   ValueListenable<String> get url => _url;
@@ -90,14 +97,39 @@ class CefBrowserView implements BrowserView {
   @override
   Future<void> reload() => _controller.reload();
 
-  // webview_cef 0.6.2 exposes no stop-loading call.
   @override
-  bool get supportsStop => false;
+  Future<void> reloadIgnoringCache() => _controller.reloadIgnoreCache();
+
   @override
-  Future<void> stop() async {}
+  bool get supportsStop => true;
+  @override
+  Future<void> stop() => _controller.stopLoad();
 
   @override
   Future<void> openDevTools() => _controller.openDevTools();
+
+  @override
+  bool get supportsPageTools => true;
+  @override
+  ValueListenable<double> get zoom => _zoom;
+  @override
+  Future<void> zoomStep(int direction) => _controller.zoom(direction.sign);
+  @override
+  Future<void> find(String text, {bool forward = true, bool findNext = false}) {
+    if (text.isEmpty) return stopFinding();
+    return _controller.find(text, forward: forward, findNext: findNext);
+  }
+
+  @override
+  Future<void> stopFinding() {
+    _findResult.value = FindResult.none;
+    return _controller.stopFinding();
+  }
+
+  @override
+  ValueListenable<FindResult> get findResult => _findResult;
+  @override
+  Future<void> printPage() => _controller.printPage();
 
   @override
   Stream<PageContextMenu> get contextMenus => _contextMenus.stream;

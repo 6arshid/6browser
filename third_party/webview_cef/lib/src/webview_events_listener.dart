@@ -57,6 +57,12 @@ class WebviewContextMenu {
 
 typedef ContextMenuCb = void Function(WebviewContextMenu menu);
 
+/// 6browser patch: find-in-page progress. [activeMatch] is 1-based.
+typedef FindResultCb = void Function(int count, int activeMatch, bool finalUpdate);
+
+/// 6browser patch: Chromium zoom level (0 is 100%, each step a factor 1.2).
+typedef ZoomChangedCb = void Function(double level);
+
 class WebviewEventsListener {
   TitleChangeCb? onTitleChanged;
   UrlChangeCb? onUrlChanged;
@@ -64,6 +70,8 @@ class WebviewEventsListener {
   LoadStartCb? onLoadStart;
   LoadStopCb? onLoadEnd;
   ContextMenuCb? onContextMenu;
+  FindResultCb? onFindResult;
+  ZoomChangedCb? onZoomChanged;
 
   WebviewEventsListener({
     this.onTitleChanged,
@@ -72,5 +80,7 @@ class WebviewEventsListener {
     this.onLoadStart,
     this.onLoadEnd,
     this.onContextMenu,
+    this.onFindResult,
+    this.onZoomChanged,
   });
 }

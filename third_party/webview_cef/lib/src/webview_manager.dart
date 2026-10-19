@@ -159,6 +159,18 @@ class WebviewManager extends ValueNotifier<bool> {
         _webViews[browserId]?.handleContextMenu(
             Map<String, dynamic>.from(call.arguments as Map));
         return;
+      case 'onFindResult':
+        int browserId = call.arguments['browserId'] as int;
+        _webViews[browserId]?.listener?.onFindResult?.call(
+            call.arguments['count'] as int,
+            call.arguments['activeMatch'] as int,
+            call.arguments['finalUpdate'] as bool);
+        return;
+      case 'onZoomChanged':
+        int browserId = call.arguments['browserId'] as int;
+        _webViews[browserId]?.listener?.onZoomChanged
+            ?.call((call.arguments['level'] as num).toDouble());
+        return;
       case 'onLoadStart':
         int browserId = call.arguments["browserId"] as int;
         String urlId = call.arguments["urlId"] as String;

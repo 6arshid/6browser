@@ -71,7 +71,27 @@ class ShotView implements BrowserView {
   @override
   Future<void> stop() async {}
   @override
+  Future<void> reloadIgnoringCache() async {}
+  @override
   Future<void> openDevTools() async {}
+  @override
+  bool get supportsPageTools => false;
+  @override
+  final ValueNotifier<double> zoom = ValueNotifier(1);
+  @override
+  Future<void> zoomStep(int direction) async {}
+  @override
+  Future<void> find(
+    String text, {
+    bool forward = true,
+    bool findNext = false,
+  }) async {}
+  @override
+  Future<void> stopFinding() async {}
+  @override
+  final ValueNotifier<FindResult> findResult = ValueNotifier(FindResult.none);
+  @override
+  Future<void> printPage() async {}
   final menus = StreamController<PageContextMenu>.broadcast();
   @override
   Stream<PageContextMenu> get contextMenus => menus.stream;

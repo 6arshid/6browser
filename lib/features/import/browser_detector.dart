@@ -42,7 +42,10 @@ class BrowserDetector {
     return out;
   }
 
-  Iterable<BrowserProfile> _chromium(SourceBrowser browser, String installRoot) {
+  Iterable<BrowserProfile> _chromium(
+    SourceBrowser browser,
+    String installRoot,
+  ) {
     final userData = Directory(p.join(installRoot, 'User Data'));
     if (!userData.existsSync()) return const [];
     final out = <BrowserProfile>[];
@@ -58,9 +61,7 @@ class BrowserDetector {
           File(p.join(entry.path, 'Preferences')).existsSync() ||
           File(p.join(entry.path, 'Bookmarks')).existsSync();
       if (!hasData) continue;
-      out.add(
-        BrowserProfile(browser: browser, name: name, path: entry.path),
-      );
+      out.add(BrowserProfile(browser: browser, name: name, path: entry.path));
     }
     return out;
   }

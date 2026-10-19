@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart' show Value;
-import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/database.dart';
@@ -46,6 +47,10 @@ final tabsProvider = NotifierProvider<TabsController, TabsState>(
 /// Owns the list of tabs and every operation on it.
 class TabsController extends Notifier<TabsState> {
   int _nextId = 1;
+
+  /// URLs of recently closed normal tabs, newest last (Ctrl+Shift+T).
+  /// Private tabs are never remembered.
+  final _closed = <String>[];
 
   BrowserEngine get _engine => ref.read(engineProvider);
 
@@ -129,11 +134,41 @@ class TabsController extends Notifier<TabsState> {
     select(state.tabs[(state.activeIndex + delta) % n].id);
   }
 
+  /// Selects the tab at [index] (Ctrl+1..8); out of range does nothing.
+  void selectIndex(int index) {
+    if (index >= 0 && index < state.tabs.length) select(state.tabs[index].id);
+  }
+
+  /// Selects the rightmost tab (Ctrl+9).
+  void selectLast() {
+    if (state.tabs.isNotEmpty) select(state.tabs.last.id);
+  }
+
+  /// Moves the active tab one place left (-1) or right (1), staying within
+  /// its pinned / unpinned group (Ctrl+Shift+PgUp / PgDn).
+  void moveActive(int delta) {
+    final i = state.activeIndex;
+    final j = i + delta;
+    if (state.tabs.isEmpty || j < 0 || j >= state.tabs.length) return;
+    if (state.tabs[i].pinned != state.tabs[j].pinned) return;
+    reorder(i, j);
+  }
+
+  /// Reopens the most recently closed tab (Ctrl+Shift+T).
+  void reopenClosed() {
+    if (_closed.isNotEmpty) newTab(url: _closed.removeLast());
+  }
+
   /// Closes a tab. Closing the last tab opens a fresh home tab.
   void close(int id) {
     final i = state.tabs.indexWhere((t) => t.id == id);
     if (i < 0) return;
     final closing = state.tabs[i];
+    final closingUrl = closing.view.url.value;
+    if (!closing.view.incognito && isRecordableUrl(closingUrl)) {
+      _closed.add(closingUrl);
+      if (_closed.length > 25) _closed.removeAt(0);
+    }
     final remaining = [...state.tabs]..removeAt(i);
     var active = state.activeId;
     if (active == id && remaining.isNotEmpty) {

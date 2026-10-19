@@ -34,7 +34,30 @@ abstract class BrowserView {
   Future<void> stop();
   bool get supportsStop;
 
+  /// Reloads, bypassing the cache (Ctrl+Shift+R / Shift+F5).
+  Future<void> reloadIgnoringCache();
+
   Future<void> openDevTools();
+
+  /// Page zoom as a factor (1.0 is 100%). Chromium keeps zoom per site, so
+  /// it can also change when the tab navigates.
+  ValueListenable<double> get zoom;
+
+  /// Zooms out (-1), back to 100% (0) or in (1) using Chrome's zoom steps.
+  Future<void> zoomStep(int direction);
+
+  /// Find in page. Matches are highlighted by the engine and reported
+  /// through [findResult]. [findNext] continues the current search.
+  Future<void> find(String text, {bool forward = true, bool findNext = false});
+  Future<void> stopFinding();
+  ValueListenable<FindResult> get findResult;
+
+  /// Opens the print dialog for the page.
+  Future<void> printPage();
+
+  /// False when the backend cannot zoom, find or print (the shortcuts are
+  /// then ignored).
+  bool get supportsPageTools;
 
   /// Right-click (context menu) requests from the page. The app draws the
   /// menu. Backends that show a native menu themselves never emit.
@@ -53,6 +76,16 @@ abstract class BrowserView {
 }
 
 enum EditCommand { undo, redo, cut, copy, paste, delete, selectAll }
+
+/// Find-in-page progress: match [active] (1-based) of [count].
+class FindResult {
+  const FindResult({this.count = 0, this.active = 0});
+
+  static const none = FindResult();
+
+  final int count;
+  final int active;
+}
 
 /// What was under the pointer when the page asked for a context menu.
 class PageContextMenu {

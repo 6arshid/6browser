@@ -1,17 +1,27 @@
+import 'dart:ui' show AppExitType;
+
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../data/providers.dart';
+import '../engine/browser_engine.dart';
 
 import '../features/bookmarks/bookmarks_page.dart';
 import '../features/downloads/downloads_page.dart';
 import '../features/history/history_page.dart';
 import '../features/new_tab/new_tab_page.dart';
+import '../features/settings/settings_page.dart';
 import '../features/settings/app_settings.dart';
 import '../features/tabs/tabs_controller.dart';
 import '../features/tabs/url_input.dart';
 import '../features/themes/theme_service.dart';
 import 'bookmarks_bar.dart';
+import 'browser_commands.dart';
 import 'browser_theme.dart';
+import 'find_bar.dart';
+import 'fullscreen.dart';
 import 'mobile_chrome.dart';
 import 'page_context_menu.dart';
 import 'tab_strip.dart';
@@ -29,6 +39,13 @@ class BrowserShell extends ConsumerStatefulWidget {
 
 class _BrowserShellState extends ConsumerState<BrowserShell> {
   final _addressFocus = FocusNode();
+  final _menuKey = GlobalKey<PopupMenuButtonState<String>>();
+
+  // Find in page (Ctrl+F). The bar belongs to one tab; switching tabs
+  // closes it.
+  final _findText = TextEditingController();
+  final _findFocus = FocusNode();
+  BrowserView? _findView;
 
   @override
   void initState() {
@@ -45,18 +62,176 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
   void dispose() {
     _addressFocus.removeListener(_onAddressFocus);
     _addressFocus.dispose();
+    _findText.dispose();
+    _findFocus.dispose();
     super.dispose();
+  }
+
+  void _openFind(BrowserView view) {
+    if (!view.supportsPageTools) return;
+    if (!identical(_findView, view)) _closeFind();
+    setState(() => _findView = view);
+    _findFocus.requestFocus();
+    _findText.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _findText.text.length,
+    );
+    if (_findText.text.isNotEmpty) view.find(_findText.text);
+  }
+
+  void _closeFind() {
+    final view = _findView;
+    if (view == null) return;
+    view.stopFinding();
+    setState(() => _findView = null);
+  }
+
+  void _findStep(BrowserView view, {required bool forward}) {
+    if (!identical(_findView, view) || _findText.text.isEmpty) {
+      _openFind(view);
+      return;
+    }
+    view.find(_findText.text, forward: forward, findNext: true);
+  }
+
+  void _snack(String text) =>
+      ScaffoldMessenger.maybeOf(context)
+          ?.showSnackBar(SnackBar(content: Text(text)));
+
+  /// Runs a keyboard shortcut or menu command, as Chrome does.
+  void _run(BrowserCommand command) {
+    final ctl = ref.read(tabsProvider.notifier);
+    final state = ref.read(tabsProvider);
+    final view = state.active?.view;
+    final db = ref.read(databaseProvider);
+    switch (command) {
+      case BrowserCommand.newTab || BrowserCommand.newWindow:
+        ctl.newTab();
+      case BrowserCommand.newIncognitoTab:
+        ctl.newIncognitoTab();
+      case BrowserCommand.reopenClosedTab:
+        ctl.reopenClosed();
+      case BrowserCommand.closeTab:
+        final a = state.active;
+        if (a != null) ctl.close(a.id);
+      case BrowserCommand.closeWindow:
+        ServicesBinding.instance.exitApplication(AppExitType.cancelable);
+      case BrowserCommand.nextTab:
+        ctl.cycle();
+      case BrowserCommand.previousTab:
+        ctl.cycle(delta: -1);
+      case BrowserCommand.tab1 ||
+          BrowserCommand.tab2 ||
+          BrowserCommand.tab3 ||
+          BrowserCommand.tab4 ||
+          BrowserCommand.tab5 ||
+          BrowserCommand.tab6 ||
+          BrowserCommand.tab7 ||
+          BrowserCommand.tab8:
+        ctl.selectIndex(command.index - BrowserCommand.tab1.index);
+      case BrowserCommand.lastTab:
+        ctl.selectLast();
+      case BrowserCommand.moveTabLeft:
+        ctl.moveActive(-1);
+      case BrowserCommand.moveTabRight:
+        ctl.moveActive(1);
+      case BrowserCommand.fullscreen:
+        Fullscreen.toggle();
+      case BrowserCommand.back:
+        view?.goBack();
+      case BrowserCommand.forward:
+        view?.goForward();
+      case BrowserCommand.reload:
+        view?.reload();
+      case BrowserCommand.hardReload:
+        view?.reloadIgnoringCache();
+      case BrowserCommand.stop:
+        // Esc leaves the address bar, find bar or full screen first.
+        if (_addressFocus.hasFocus) {
+          _addressFocus.unfocus();
+        } else if (_findView != null) {
+          _closeFind();
+        } else if (Fullscreen.active.value) {
+          Fullscreen.set(false);
+        } else if (view != null && view.isLoading.value) {
+          view.stop();
+        }
+      case BrowserCommand.home:
+        view?.load(ref.read(appSettingsProvider).homeUrl);
+      case BrowserCommand.focusAddress || BrowserCommand.search:
+        Fullscreen.set(false);
+        _addressFocus.requestFocus();
+      case BrowserCommand.find:
+        if (view != null) _openFind(view);
+      case BrowserCommand.findNext:
+        if (view != null) _findStep(view, forward: true);
+      case BrowserCommand.findPrevious:
+        if (view != null) _findStep(view, forward: false);
+      case BrowserCommand.zoomIn:
+        view?.zoomStep(1);
+      case BrowserCommand.zoomOut:
+        view?.zoomStep(-1);
+      case BrowserCommand.zoomReset:
+        view?.zoomStep(0);
+      case BrowserCommand.print:
+        view?.printPage();
+      case BrowserCommand.savePage:
+        final url = view?.url.value ?? '';
+        if (view != null && isRecordableUrl(url)) view.download(url);
+      case BrowserCommand.openFile:
+        _openFile(view);
+      case BrowserCommand.viewSource:
+        final url = view?.url.value ?? '';
+        if (view != null && isRecordableUrl(url)) {
+          ctl.newTab(url: 'view-source:$url', incognito: view.incognito);
+        }
+      case BrowserCommand.bookmarkPage:
+        final url = view?.url.value ?? '';
+        if (view == null || !isBookmarkable(url)) return;
+        db.addBookmark(url, view.title.value);
+        _snack('Bookmark added');
+      case BrowserCommand.bookmarkAllTabs:
+        db
+            .addBookmarks([
+              for (final t in state.tabs)
+                if (isBookmarkable(t.view.url.value))
+                  (url: t.view.url.value, title: t.view.title.value),
+            ])
+            .then((n) => _snack('Bookmarks added: $n'));
+      case BrowserCommand.toggleBookmarksBar:
+        toggleBookmarksBar(ref);
+      case BrowserCommand.bookmarks:
+        openPage(context, const BookmarksPage());
+      case BrowserCommand.history:
+        openPage(context, const HistoryPage());
+      case BrowserCommand.downloads:
+        openPage(context, const DownloadsPage());
+      case BrowserCommand.clearBrowsingData:
+        openPage(context, const SettingsPage());
+      case BrowserCommand.menu:
+        _menuKey.currentState?.showButtonMenu();
+      case BrowserCommand.devTools:
+        view?.openDevTools();
+    }
+  }
+
+  Future<void> _openFile(BrowserView? view) async {
+    final file = await openFile();
+    if (file == null || view == null) return;
+    await view.load(Uri.file(file.path).toString());
   }
 
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(tabsProvider);
-    final ctl = ref.read(tabsProvider.notifier);
     final compact = MediaQuery.sizeOf(context).width < compactBreakpoint;
     final typing =
         _addressFocus.hasFocus || MediaQuery.viewInsetsOf(context).bottom > 0;
     final settings = ref.watch(appSettingsProvider);
     final view = state.active?.view;
+    if (_findView != null && !identical(_findView, view)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _closeFind());
+    }
     final colors = BrowserColors.of(context);
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => WindowCaption.apply(colors.frame),
@@ -75,112 +250,103 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
 
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyT, control: true):
-            ctl.newTab,
-        const SingleActivator(
-          LogicalKeyboardKey.keyN,
-          control: true,
-          shift: true,
-        ): ctl.newIncognitoTab,
-        const SingleActivator(LogicalKeyboardKey.keyW, control: true): () {
-          final a = state.active;
-          if (a != null) ctl.close(a.id);
-        },
-        const SingleActivator(LogicalKeyboardKey.keyL, control: true): () =>
-            _addressFocus.requestFocus(),
-        const SingleActivator(LogicalKeyboardKey.tab, control: true): ctl.cycle,
-        const SingleActivator(
-          LogicalKeyboardKey.tab,
-          control: true,
-          shift: true,
-        ): () =>
-            ctl.cycle(delta: -1),
-        const SingleActivator(LogicalKeyboardKey.f12): () =>
-            view?.openDevTools(),
-        const SingleActivator(LogicalKeyboardKey.f5): () => view?.reload(),
-        const SingleActivator(LogicalKeyboardKey.keyR, control: true): () =>
-            view?.reload(),
-        const SingleActivator(LogicalKeyboardKey.arrowLeft, alt: true): () =>
-            view?.goBack(),
-        const SingleActivator(LogicalKeyboardKey.arrowRight, alt: true): () =>
-            view?.goForward(),
-        const SingleActivator(LogicalKeyboardKey.keyH, control: true): () =>
-            openPage(context, const HistoryPage()),
-        const SingleActivator(LogicalKeyboardKey.keyJ, control: true): () =>
-            openPage(context, const DownloadsPage()),
-        const SingleActivator(
-          LogicalKeyboardKey.keyO,
-          control: true,
-          shift: true,
-        ): () =>
-            openPage(context, const BookmarksPage()),
-        const SingleActivator(
-          LogicalKeyboardKey.keyB,
-          control: true,
-          shift: true,
-        ): () =>
-            toggleBookmarksBar(ref),
+        for (final MapEntry(key: command, value: keys)
+            in browserShortcuts.entries)
+          for (final key in keys) key: () => _run(command),
       },
-      child: Focus(
-        autofocus: true,
-        child: Scaffold(
-          backgroundColor: colors.frame,
-          body: SafeArea(
-            child: Column(
-              children: [
-                if (!compact) const TabStrip(),
-                chrome(BrowserToolbar(addressFocus: _addressFocus)),
-                if (view != null)
-                  ValueListenableBuilder<String>(
-                    valueListenable: view.url,
-                    builder: (_, url, _) => Column(
-                      children: [
-                        if (settings.showBookmarksBar || isNewTabUrl(url))
-                          chrome(const BookmarksBar()),
-                        if (isWebStoreUrl(url)) _WebStoreBar(url: url),
-                      ],
-                    ),
-                  ),
-                Expanded(
-                  child: state.tabs.isEmpty
-                      ? const Center(child: CircularProgressIndicator())
-                      : IndexedStack(
-                          index: state.activeIndex,
+      child: BrowserCommands(
+        run: _run,
+        child: Focus(
+          autofocus: true,
+          child: ValueListenableBuilder<bool>(
+            valueListenable: Fullscreen.active,
+            builder: (context, fullscreen, _) => Scaffold(
+              backgroundColor: colors.frame,
+              body: SafeArea(
+                child: Column(
+                  children: [
+                    if (!compact && !fullscreen) const TabStrip(),
+                    if (!fullscreen)
+                      chrome(
+                        BrowserToolbar(
+                          addressFocus: _addressFocus,
+                          menuKey: _menuKey,
+                        ),
+                      ),
+                    if (view != null && !fullscreen)
+                      ValueListenableBuilder<String>(
+                        valueListenable: view.url,
+                        builder: (_, url, _) => Column(
                           children: [
-                            for (final t in state.tabs)
-                              KeyedSubtree(
-                                key: ValueKey(t.id),
-                                child: Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    ValueListenableBuilder<bool>(
-                                      valueListenable: t.view.isReady,
-                                      builder: (_, ready, _) => ready
-                                          ? PageContextMenuHost(
-                                              view: t.view,
-                                              child: t.view.widget,
-                                            )
-                                          : const Center(
-                                              child:
-                                                  CircularProgressIndicator(),
-                                            ),
-                                    ),
-                                    // The New Tab page covers the engine's
-                                    // blank page; the view stays alive below.
-                                    ValueListenableBuilder<String>(
-                                      valueListenable: t.view.url,
-                                      builder: (_, url, _) => isNewTabUrl(url)
-                                          ? NewTabPage(view: t.view)
-                                          : const SizedBox.shrink(),
-                                    ),
-                                  ],
-                                ),
-                              ),
+                            if (settings.showBookmarksBar || isNewTabUrl(url))
+                              chrome(const BookmarksBar()),
+                            if (isWebStoreUrl(url)) _WebStoreBar(url: url),
                           ],
                         ),
+                      ),
+                    Expanded(
+                      child: state.tabs.isEmpty
+                          ? const Center(child: CircularProgressIndicator())
+                          : Stack(
+                              children: [
+                                Positioned.fill(
+                                  child: IndexedStack(
+                                    index: state.activeIndex,
+                                    children: [
+                                      for (final t in state.tabs)
+                                        KeyedSubtree(
+                                          key: ValueKey(t.id),
+                                          child: Stack(
+                                            fit: StackFit.expand,
+                                            children: [
+                                              ValueListenableBuilder<bool>(
+                                                valueListenable: t.view.isReady,
+                                                builder: (_, ready, _) => ready
+                                                    ? PageContextMenuHost(
+                                                        view: t.view,
+                                                        child: t.view.widget,
+                                                      )
+                                                    : const Center(
+                                                        child:
+                                                            CircularProgressIndicator(),
+                                                      ),
+                                              ),
+                                              // The New Tab page covers the engine's
+                                              // blank page; the view stays alive below.
+                                              ValueListenableBuilder<String>(
+                                                valueListenable: t.view.url,
+                                                builder: (_, url, _) =>
+                                                    isNewTabUrl(url)
+                                                    ? NewTabPage(view: t.view)
+                                                    : const SizedBox.shrink(),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                                if (_findView case final findView?)
+                                  Positioned(
+                                    top: 0,
+                                    right: 16,
+                                    child: chrome(
+                                      FindBar(
+                                        view: findView,
+                                        controller: _findText,
+                                        focusNode: _findFocus,
+                                        onClose: _closeFind,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                    ),
+                    if (compact && !typing && !fullscreen)
+                      chrome(const MobileBottomBar()),
+                  ],
                 ),
-                if (compact && !typing) chrome(const MobileBottomBar()),
-              ],
+              ),
             ),
           ),
         ),

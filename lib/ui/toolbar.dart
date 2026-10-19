@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/providers.dart';
@@ -13,8 +14,11 @@ import '../features/settings/settings_page.dart';
 import '../features/tabs/tabs_controller.dart';
 import '../features/tabs/url_input.dart';
 import '../features/themes/theme_service.dart';
+import 'browser_commands.dart';
 import 'browser_theme.dart';
 import 'favicon.dart';
+import 'fullscreen.dart';
+import 'shortcuts_page.dart';
 
 /// Below this width the toolbar collapses secondary actions into a menu and
 /// the tab strip becomes a tab-count button.
@@ -34,9 +38,12 @@ void toggleBookmarksBar(WidgetRef ref) => ref
 
 /// Navigation buttons, address bar and the main menu for the active tab.
 class BrowserToolbar extends ConsumerStatefulWidget {
-  const BrowserToolbar({super.key, required this.addressFocus});
+  const BrowserToolbar({super.key, required this.addressFocus, this.menuKey});
 
   final FocusNode addressFocus;
+
+  /// Lets the shell open the main menu from the keyboard (Alt+F / F10).
+  final GlobalKey<PopupMenuButtonState<String>>? menuKey;
 
   @override
   ConsumerState<BrowserToolbar> createState() => _BrowserToolbarState();
@@ -122,7 +129,19 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
     final colors = BrowserColors.of(context);
 
     void go(String text) {
-      view?.load(resolveInput(text, searchTemplate: settings.searchTemplate));
+      final keys = HardwareKeyboard.instance;
+      final word = text.trim();
+      if (keys.isControlPressed && RegExp(r'^[\w-]+$').hasMatch(word)) {
+        text = 'www.$word.com';
+      }
+      final url = resolveInput(text, searchTemplate: settings.searchTemplate);
+      if (keys.isAltPressed) {
+        ref
+            .read(tabsProvider.notifier)
+            .newTab(url: url, incognito: view?.incognito ?? false);
+      } else {
+        view?.load(url);
+      }
       widget.addressFocus.unfocus();
     }
 
@@ -210,7 +229,7 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
                       null => const SizedBox.shrink(),
                     },
                   ),
-                if (!compact) _MainMenu(view: view),
+                if (!compact) _MainMenu(menuKey: widget.menuKey, view: view),
                 if (compact && !editing && view != null) reload,
               ],
             ),
@@ -330,7 +349,13 @@ class _Omnibox extends ConsumerWidget {
                           ),
                     suffixIcon: view == null || compact
                         ? null
-                        : _BookmarkStar(view: view),
+                        : Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _ZoomChip(view: view),
+                              _BookmarkStar(view: view),
+                            ],
+                          ),
                   ),
                   onTap: () => controller.selection = TextSelection(
                     baseOffset: 0,
@@ -467,6 +492,32 @@ class _SiteChip extends StatelessWidget {
   }
 }
 
+/// Shows the page zoom when it is not 100%; clicking resets it (Ctrl+0).
+class _ZoomChip extends StatelessWidget {
+  const _ZoomChip({required this.view});
+
+  final BrowserView view;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<double>(
+    valueListenable: view.zoom,
+    builder: (_, zoom, _) {
+      final percent = (zoom * 100).round();
+      if (percent == 100) return const SizedBox.shrink();
+      return TextButton.icon(
+        key: const ValueKey('zoom-chip'),
+        style: TextButton.styleFrom(
+          visualDensity: VisualDensity.compact,
+          foregroundColor: BrowserColors.of(context).omniboxText,
+        ),
+        icon: Icon(percent > 100 ? Icons.zoom_in : Icons.zoom_out, size: 18),
+        label: Text('$percent%'),
+        onPressed: () => view.zoomStep(0),
+      );
+    },
+  );
+}
+
 /// Star that shows and toggles whether the current page is bookmarked.
 class _BookmarkStar extends ConsumerWidget {
   const _BookmarkStar({required this.view});
@@ -500,9 +551,10 @@ class _BookmarkStar extends ConsumerWidget {
 
 /// The "⋮" menu, with icons and keyboard shortcuts like Chrome's.
 class _MainMenu extends ConsumerWidget {
-  const _MainMenu({required this.view});
+  const _MainMenu({required this.view, this.menuKey});
 
   final BrowserView? view;
+  final GlobalKey<PopupMenuButtonState<String>>? menuKey;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -510,6 +562,8 @@ class _MainMenu extends ConsumerWidget {
     final settings = ref.watch(appSettingsProvider);
     final colors = BrowserColors.of(context);
     final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    final commands = BrowserCommands.maybeOf(context);
+    final pageTools = view?.supportsPageTools ?? false;
 
     PopupMenuItem<String> item(
       String value,
@@ -533,11 +587,17 @@ class _MainMenu extends ConsumerWidget {
     );
 
     return PopupMenuButton<String>(
+      key: menuKey,
       tooltip: 'Menu',
       icon: Icon(Icons.more_vert, color: colors.icon, size: 20),
       constraints: const BoxConstraints(minWidth: 300),
       position: PopupMenuPosition.under,
       onSelected: (v) {
+        if (commands != null) {
+          for (final c in BrowserCommand.values) {
+            if (c.name == v) return commands.run(c);
+          }
+        }
         switch (v) {
           case 'new':
             ctl.newTab();
@@ -559,6 +619,8 @@ class _MainMenu extends ConsumerWidget {
             openPage(context, const SettingsPage());
           case 'import':
             openPage(context, const ImportPage());
+          case 'shortcuts':
+            openPage(context, const ShortcutsPage());
         }
       },
       itemBuilder: (_) => [
@@ -568,6 +630,13 @@ class _MainMenu extends ConsumerWidget {
           Icons.visibility_off_outlined,
           'New incognito tab',
           shortcut: 'Ctrl+Shift+N',
+        ),
+        const PopupMenuDivider(),
+        item(
+          BrowserCommand.reopenClosedTab.name,
+          Icons.restore_page_outlined,
+          'Reopen closed tab',
+          shortcut: shortcutFor(BrowserCommand.reopenClosedTab),
         ),
         const PopupMenuDivider(),
         item('history', Icons.history, 'History', shortcut: 'Ctrl+H'),
@@ -590,12 +659,110 @@ class _MainMenu extends ConsumerWidget {
           checked: settings.showBookmarksBar,
         ),
         const PopupMenuDivider(),
+        if (pageTools) ...[
+          _ZoomMenuEntry(view: view!, color: muted),
+          item(
+            BrowserCommand.find.name,
+            Icons.search,
+            'Find…',
+            shortcut: shortcutFor(BrowserCommand.find),
+          ),
+          item(
+            BrowserCommand.print.name,
+            Icons.print_outlined,
+            'Print…',
+            shortcut: shortcutFor(BrowserCommand.print),
+          ),
+          item(
+            BrowserCommand.savePage.name,
+            Icons.save_outlined,
+            'Save page as…',
+            shortcut: shortcutFor(BrowserCommand.savePage),
+          ),
+          item(
+            BrowserCommand.viewSource.name,
+            Icons.data_object,
+            'View page source',
+            shortcut: shortcutFor(BrowserCommand.viewSource),
+          ),
+          const PopupMenuDivider(),
+        ],
         item('customize', Icons.palette_outlined, 'Customize appearance'),
         item('import', Icons.move_to_inbox_outlined, 'Import from browser…'),
         item('settings', Icons.settings_outlined, 'Settings'),
         const PopupMenuDivider(),
         item('devtools', Icons.code, 'Developer tools', shortcut: 'F12'),
+        item('shortcuts', Icons.keyboard_outlined, 'Keyboard shortcuts'),
       ],
+    );
+  }
+}
+
+/// Chrome's "Zoom  –  100%  +  ⛶" menu row. It stays open while zooming.
+class _ZoomMenuEntry extends PopupMenuEntry<String> {
+  const _ZoomMenuEntry({required this.view, required this.color});
+
+  final BrowserView view;
+  final Color color;
+
+  @override
+  double get height => 40;
+
+  @override
+  bool represents(String? value) => false;
+
+  @override
+  State<_ZoomMenuEntry> createState() => _ZoomMenuEntryState();
+}
+
+class _ZoomMenuEntryState extends State<_ZoomMenuEntry> {
+  @override
+  Widget build(BuildContext context) {
+    final view = widget.view;
+    final color = widget.color;
+    final text = Theme.of(context).textTheme.bodyLarge;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Row(
+        children: [
+          Icon(Icons.zoom_in, size: 18, color: color),
+          const SizedBox(width: 14),
+          Expanded(child: Text('Zoom', style: text)),
+          IconButton(
+            tooltip: 'Zoom out (${shortcutFor(BrowserCommand.zoomOut)})',
+            iconSize: 18,
+            icon: const Icon(Icons.remove),
+            onPressed: () => view.zoomStep(-1),
+          ),
+          ValueListenableBuilder<double>(
+            valueListenable: view.zoom,
+            builder: (_, zoom, _) => SizedBox(
+              width: 48,
+              child: Text(
+                '${(zoom * 100).round()}%',
+                textAlign: TextAlign.center,
+                style: text,
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Zoom in (${shortcutFor(BrowserCommand.zoomIn)})',
+            iconSize: 18,
+            icon: const Icon(Icons.add),
+            onPressed: () => view.zoomStep(1),
+          ),
+          if (Fullscreen.supported)
+            IconButton(
+              tooltip: 'Full screen (F11)',
+              iconSize: 18,
+              icon: const Icon(Icons.fullscreen),
+              onPressed: () {
+                Navigator.of(context).pop();
+                Fullscreen.toggle();
+              },
+            ),
+        ],
+      ),
     );
   }
 }

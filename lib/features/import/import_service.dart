@@ -26,7 +26,11 @@ class ImportService {
 
     if (profile.browser.isChromium) {
       final reader = ChromiumReader(profile.path);
-      _guard(issues, 'Bookmarks', () => bookmarks.addAll(reader.readBookmarks()));
+      _guard(
+        issues,
+        'Bookmarks',
+        () => bookmarks.addAll(reader.readBookmarks()),
+      );
       _guard(
         issues,
         'Extensions',
@@ -39,7 +43,11 @@ class ImportService {
       );
     } else {
       final reader = FirefoxReader(profile.path);
-      _guard(issues, 'Bookmarks', () => bookmarks.addAll(reader.readBookmarks()));
+      _guard(
+        issues,
+        'Bookmarks',
+        () => bookmarks.addAll(reader.readBookmarks()),
+      );
       _guard(
         issues,
         'Extensions',

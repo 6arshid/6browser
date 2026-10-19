@@ -151,6 +151,29 @@ class WebViewController extends ValueNotifier<bool> {
         [_browserId, pagePosition.dx.round(), pagePosition.dy.round()]);
   }
 
+  /// 6browser patch: browser shortcuts. These are no-ops until the browser
+  /// exists, so a shortcut pressed while a tab is still starting is ignored.
+  Future<void> _call(String method, Object arguments) async {
+    if (_isDisposed || !value) return;
+    return _pluginChannel.invokeMethod(method, arguments);
+  }
+
+  Future<void> stopLoad() => _call('stopLoad', _browserId);
+  Future<void> reloadIgnoreCache() => _call('reloadIgnoreCache', _browserId);
+  Future<void> printPage() => _call('print', _browserId);
+
+  /// Zooms out (-1), resets (0) or zooms in (1) using Chrome's zoom steps.
+  /// The new level arrives through [WebviewEventsListener.onZoomChanged].
+  Future<void> zoom(int command) => _call('zoom', [_browserId, command]);
+
+  /// Searches the page; results arrive through
+  /// [WebviewEventsListener.onFindResult].
+  Future<void> find(String text,
+          {bool forward = true, bool matchCase = false, bool findNext = false}) =>
+      _call('find', [_browserId, text, forward, matchCase, findNext]);
+  Future<void> stopFinding({bool clearSelection = true}) =>
+      _call('stopFinding', [_browserId, clearSelection]);
+
   /// Called by [WebviewManager] when the page asks for a context menu.
   void handleContextMenu(Map<String, dynamic> args) {
     final page = Offset(
