@@ -14,8 +14,10 @@ final factoryResetProvider = Provider<Future<void> Function()>((ref) {
           .invokeMethod<void>('factoryReset');
       return;
     }
-    final support = await getApplicationSupportDirectory();
-    await FactoryResetStore(support).schedule();
+    // Only this profile's data; other profiles keep theirs.
+    final data =
+        ref.read(dataDirProvider) ?? await getApplicationSupportDirectory();
+    await FactoryResetStore(data).schedule();
     await ref.read(databaseProvider).close();
     // End the process to release every CEF profile handle. Calling CefShutdown
     // while browser views are still alive is unsafe. Startup removes the profile

@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../../data/providers.dart';
+import '../passwords/password_store.dart';
 import 'bookmark_file_parser.dart';
 import 'browser_detector.dart';
 import 'import_models.dart';
@@ -56,13 +57,20 @@ class _ImportPageState extends ConsumerState<ImportPage> {
   Future<void> _importBookmarks() async {
     final result = _result;
     if (result == null) return;
-    final added = await _service.importBookmarks(result.bookmarks);
+    final r = await _service.importBookmarks(result.bookmarks);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Imported $added new bookmark(s).')),
+        SnackBar(
+          content: Text(
+            'Imported ${r.added} new bookmark(s).${_moved(r.moved)}',
+          ),
+        ),
       );
     }
   }
+
+  static String _moved(int n) =>
+      n == 0 ? '' : ' Moved $n existing bookmark(s) into their folders.';
 
   /// Mobile browsers can't be read directly (each app's data is sandboxed),
   /// so the user exports a bookmarks file there and picks it here.
@@ -85,11 +93,11 @@ class _ImportPageState extends ConsumerState<ImportPage> {
     String message;
     try {
       final marks = BookmarkFileParser.parse(await file.readAsString());
-      final added = await _service.importBookmarks(marks);
+      final r = await _service.importBookmarks(marks);
       message = marks.isEmpty
           ? 'No bookmarks found in ${file.name}.'
-          : 'Imported $added new bookmark(s) of ${marks.length} in '
-                '${file.name}.';
+          : 'Imported ${r.added} new bookmark(s) of ${marks.length} in '
+                '${file.name}.${_moved(r.moved)}';
     } on FormatException {
       message = '${file.name} is not a bookmarks HTML or JSON export.';
     } catch (e) {
@@ -102,6 +110,18 @@ class _ImportPageState extends ConsumerState<ImportPage> {
   }
 
   static bool get _isMobile => Platform.isAndroid || Platform.isIOS;
+
+  /// Saves the decrypted passwords into this profile's password manager.
+  Future<void> _savePasswords() async {
+    final logins = _result?.logins ?? const [];
+    if (logins.isEmpty) return;
+    final saved = await ref.read(passwordStoreProvider).import(logins);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Saved $saved password(s) in 6browser.')),
+      );
+    }
+  }
 
   Future<void> _exportPasswords() async {
     final logins = _result?.logins ?? const [];
@@ -259,6 +279,13 @@ class _ImportPageState extends ConsumerState<ImportPage> {
       Row(
         children: [
           Expanded(child: Text('${r.logins.length} decrypted')),
+          if (ref.read(passwordStoreProvider).isAvailable) ...[
+            FilledButton(
+              onPressed: r.logins.isEmpty ? null : _savePasswords,
+              child: Text('Save ${r.logins.length} in 6browser'),
+            ),
+            const SizedBox(width: 8),
+          ],
           FilledButton.tonal(
             onPressed: r.logins.isEmpty ? null : _exportPasswords,
             child: const Text('Export CSV'),

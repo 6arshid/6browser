@@ -22,12 +22,14 @@ void main() {
                 createdAt: DateTime(2026),
                 title: 'Flutter docs',
                 url: 'https://flutter.dev',
+                position: 0,
               ),
               Bookmark(
                 id: 2,
                 createdAt: DateTime(2026),
                 title: 'Language guide',
                 url: 'https://dart.dev',
+                position: 1,
               ),
             ]),
           ),
@@ -60,5 +62,34 @@ void main() {
       isEmpty,
     );
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('renames a bookmark', (tester) async {
+    final db = AppDatabase.inMemory();
+    addTearDown(db.close);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [databaseProvider.overrideWithValue(db)],
+        child: const MaterialApp(home: BookmarksPage()),
+      ),
+    );
+    await tester.runAsync(() => db.addBookmark('https://dart.dev', 'Dart'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Rename'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('bookmark-name')),
+      'Dart site',
+    );
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    final saved = await tester.runAsync(() => db.watchBookmarks().first);
+    expect(saved!.single.title, 'Dart site');
+    await tester.pumpAndSettle();
+    expect(find.text('Dart site'), findsOneWidget);
+
+    // Unmount so drift's stream subscriptions cancel, then flush their timers.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(milliseconds: 10));
   });
 }

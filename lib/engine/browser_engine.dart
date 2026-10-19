@@ -72,6 +72,18 @@ abstract class BrowserView {
   /// Opens DevTools with the element at [pagePosition] selected.
   Future<void> inspectAt(Offset pagePosition);
 
+  /// Runs [script] in the page's main frame (6browser's own page helpers,
+  /// such as saving and filling passwords).
+  Future<void> runScript(String script);
+
+  /// JavaScript for a function that sends an object from the page to
+  /// [scriptMessages]; null when this backend has no way back.
+  String? get scriptPostFunction;
+
+  /// What the page sent through [scriptPostFunction], as JSON text. Any
+  /// frame can send, so the content is untrusted.
+  Stream<String> get scriptMessages;
+
   Future<void> dispose();
 }
 

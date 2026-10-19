@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/providers.dart';
+import '../passwords/password_store.dart';
+import '../passwords/passwords_page.dart';
+import '../profiles/profiles.dart';
+import '../profiles/profiles_page.dart';
 import '../tabs/tabs_controller.dart';
 import 'app_settings.dart';
 import 'appearance_settings.dart';
@@ -25,10 +29,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Factory reset 6browser?'),
-        content: const Text(
+        content: Text(
           'Permanently delete all settings, bookmarks, history, shortcuts, '
-          'installed themes, download records, cookies, saved site data and '
-          'sign-ins. All tabs and active downloads will close. '
+          'saved passwords, installed themes, download records, cookies, '
+          'saved site data and sign-ins'
+          '${ref.read(activeProfileProvider) == null ? '' : ' of this profile (other profiles keep theirs)'}'
+          '. All tabs and active downloads will close. '
           'Downloaded files are kept.\n\n'
           'The browser will close. Reopen it to finish resetting. '
           'This cannot be undone.',
@@ -101,6 +107,25 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
               children: [
+                if (currentProfile(ref) case final me?)
+                  _Section(
+                    icon: Icons.people_outline,
+                    title: 'Profiles',
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: ProfileAvatar(profile: me, radius: 18),
+                      title: Text(me.name),
+                      subtitle: const Text(
+                        'This window. Add, open, rename or delete profiles',
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const ProfilesPage(),
+                        ),
+                      ),
+                    ),
+                  ),
                 const _Section(
                   icon: Icons.palette_outlined,
                   title: 'Appearance',
@@ -162,6 +187,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     ),
                     onSubmitted: (v) => db.setSetting('homeUrl', v.trim()),
                   ),
+                ),
+                _Section(
+                  icon: Icons.key_outlined,
+                  title: 'Passwords',
+                  child: _PasswordSettings(settings: s),
                 ),
                 _Section(
                   icon: Icons.shield_outlined,
@@ -248,6 +278,53 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Offer to save, fill in, and the list of saved passwords.
+class _PasswordSettings extends ConsumerWidget {
+  const _PasswordSettings({required this.settings});
+
+  final AppSettings settings;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final db = ref.read(databaseProvider);
+    final store = ref.watch(passwordStoreProvider);
+    if (!store.isAvailable) {
+      return const Text(
+        'Saving passwords is not available on this system yet.',
+      );
+    }
+    final count = ref.watch(savedLoginsProvider).value?.length ?? 0;
+    return Column(
+      children: [
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Offer to save passwords'),
+          subtitle: const Text('After you sign in to a site'),
+          value: settings.savePasswords,
+          onChanged: (v) => db.setSetting('passwordsSave', '$v'),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Fill in saved passwords'),
+          subtitle: const Text('When a sign-in page opens'),
+          value: settings.fillPasswords,
+          onChanged: (v) => db.setSetting('passwordsFill', '$v'),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.password_outlined),
+          title: const Text('Saved passwords'),
+          subtitle: Text(count == 1 ? '1 password' : '$count passwords'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const PasswordsPage()),
+          ),
+        ),
+      ],
     );
   }
 }

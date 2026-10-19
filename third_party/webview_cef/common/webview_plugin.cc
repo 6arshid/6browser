@@ -19,6 +19,9 @@ namespace webview_cef {
 	CefMainArgs mainArgs;
 	CefRefPtr<WebviewApp> app;
 	CefString userAgent;
+	// 6browser patch: the browser profile's data folder (UTF-8), set from
+	// Dart before "init". Empty: the default folder below.
+	std::string cachePath;
 	bool isCefInitialized = false;
 #ifdef OS_MAC
 	std::string g_macSubprocessPath;
@@ -379,6 +382,13 @@ namespace webview_cef {
 				startCEF();
 			}
 			initCallback();
+			result(1, nullptr);
+		}
+		else if (name.compare("setCachePath") == 0) {
+			// 6browser patch: must come before "init"; CEF reads it once.
+			if (values != nullptr) {
+				cachePath = webview_value_get_string(values);
+			}
 			result(1, nullptr);
 		}
 		else if (name.compare("quit") == 0) {
@@ -861,11 +871,18 @@ namespace webview_cef {
 		CefSettings cefs;
 		cefs.windowless_rendering_enabled = true;
 		cefs.no_sandbox = true;
+		if (!cachePath.empty()) {
+			// 6browser patch: each browser profile keeps its cookies, storage
+			// and cache in its own folder. CEF also allows only one process per
+			// root_cache_path, so every profile window needs its own.
+			CefString(&cefs.root_cache_path) = cachePath;
+			CefString(&cefs.cache_path) = cachePath;
+		}
 #ifdef _WIN32
 		// 6browser patch: persistent profile (cookies, localStorage, cache) in
 		// %APPDATA%/6arshid/6browser/cef_profile. Without cache_path CEF
 		// keeps everything in memory and the user is logged out on every start.
-		{
+		else {
 			PWSTR roaming = nullptr;
 			if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &roaming)) && roaming) {
 				std::filesystem::path profile = std::filesystem::path(roaming) / L"6arshid" / L"6browser" / L"cef_profile";

@@ -22,14 +22,25 @@ class $BookmarksTable extends Bookmarks
       'PRIMARY KEY AUTOINCREMENT',
     ),
   );
+  static const VerificationMeta _parentIdMeta = const VerificationMeta(
+    'parentId',
+  );
+  @override
+  late final GeneratedColumn<int> parentId = GeneratedColumn<int>(
+    'parent_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _urlMeta = const VerificationMeta('url');
   @override
   late final GeneratedColumn<String> url = GeneratedColumn<String>(
     'url',
     aliasedName,
-    false,
+    true,
     type: DriftSqlType.string,
-    requiredDuringInsert: true,
+    requiredDuringInsert: false,
     defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
   );
   static const VerificationMeta _titleMeta = const VerificationMeta('title');
@@ -40,6 +51,18 @@ class $BookmarksTable extends Bookmarks
     false,
     type: DriftSqlType.string,
     requiredDuringInsert: true,
+  );
+  static const VerificationMeta _positionMeta = const VerificationMeta(
+    'position',
+  );
+  @override
+  late final GeneratedColumn<int> position = GeneratedColumn<int>(
+    'position',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
   );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
@@ -53,7 +76,14 @@ class $BookmarksTable extends Bookmarks
     requiredDuringInsert: true,
   );
   @override
-  List<GeneratedColumn> get $columns => [id, url, title, createdAt];
+  List<GeneratedColumn> get $columns => [
+    id,
+    parentId,
+    url,
+    title,
+    position,
+    createdAt,
+  ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -69,13 +99,17 @@ class $BookmarksTable extends Bookmarks
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
     }
+    if (data.containsKey('parent_id')) {
+      context.handle(
+        _parentIdMeta,
+        parentId.isAcceptableOrUnknown(data['parent_id']!, _parentIdMeta),
+      );
+    }
     if (data.containsKey('url')) {
       context.handle(
         _urlMeta,
         url.isAcceptableOrUnknown(data['url']!, _urlMeta),
       );
-    } else if (isInserting) {
-      context.missing(_urlMeta);
     }
     if (data.containsKey('title')) {
       context.handle(
@@ -84,6 +118,12 @@ class $BookmarksTable extends Bookmarks
       );
     } else if (isInserting) {
       context.missing(_titleMeta);
+    }
+    if (data.containsKey('position')) {
+      context.handle(
+        _positionMeta,
+        position.isAcceptableOrUnknown(data['position']!, _positionMeta),
+      );
     }
     if (data.containsKey('created_at')) {
       context.handle(
@@ -106,13 +146,21 @@ class $BookmarksTable extends Bookmarks
         DriftSqlType.int,
         data['${effectivePrefix}id'],
       )!,
+      parentId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}parent_id'],
+      ),
       url: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}url'],
-      )!,
+      ),
       title: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}title'],
+      )!,
+      position: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}position'],
       )!,
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
@@ -129,21 +177,37 @@ class $BookmarksTable extends Bookmarks
 
 class Bookmark extends DataClass implements Insertable<Bookmark> {
   final int id;
-  final String url;
+
+  /// The folder holding this item; null for items on the bookmarks bar.
+  final int? parentId;
+
+  /// The page address; null for a folder.
+  final String? url;
   final String title;
+
+  /// Order among the items of the same folder.
+  final int position;
   final DateTime createdAt;
   const Bookmark({
     required this.id,
-    required this.url,
+    this.parentId,
+    this.url,
     required this.title,
+    required this.position,
     required this.createdAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<int>(id);
-    map['url'] = Variable<String>(url);
+    if (!nullToAbsent || parentId != null) {
+      map['parent_id'] = Variable<int>(parentId);
+    }
+    if (!nullToAbsent || url != null) {
+      map['url'] = Variable<String>(url);
+    }
     map['title'] = Variable<String>(title);
+    map['position'] = Variable<int>(position);
     map['created_at'] = Variable<DateTime>(createdAt);
     return map;
   }
@@ -151,8 +215,12 @@ class Bookmark extends DataClass implements Insertable<Bookmark> {
   BookmarksCompanion toCompanion(bool nullToAbsent) {
     return BookmarksCompanion(
       id: Value(id),
-      url: Value(url),
+      parentId: parentId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(parentId),
+      url: url == null && nullToAbsent ? const Value.absent() : Value(url),
       title: Value(title),
+      position: Value(position),
       createdAt: Value(createdAt),
     );
   }
@@ -164,8 +232,10 @@ class Bookmark extends DataClass implements Insertable<Bookmark> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return Bookmark(
       id: serializer.fromJson<int>(json['id']),
-      url: serializer.fromJson<String>(json['url']),
+      parentId: serializer.fromJson<int?>(json['parentId']),
+      url: serializer.fromJson<String?>(json['url']),
       title: serializer.fromJson<String>(json['title']),
+      position: serializer.fromJson<int>(json['position']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
     );
   }
@@ -174,28 +244,36 @@ class Bookmark extends DataClass implements Insertable<Bookmark> {
     serializer ??= driftRuntimeOptions.defaultSerializer;
     return <String, dynamic>{
       'id': serializer.toJson<int>(id),
-      'url': serializer.toJson<String>(url),
+      'parentId': serializer.toJson<int?>(parentId),
+      'url': serializer.toJson<String?>(url),
       'title': serializer.toJson<String>(title),
+      'position': serializer.toJson<int>(position),
       'createdAt': serializer.toJson<DateTime>(createdAt),
     };
   }
 
   Bookmark copyWith({
     int? id,
-    String? url,
+    Value<int?> parentId = const Value.absent(),
+    Value<String?> url = const Value.absent(),
     String? title,
+    int? position,
     DateTime? createdAt,
   }) => Bookmark(
     id: id ?? this.id,
-    url: url ?? this.url,
+    parentId: parentId.present ? parentId.value : this.parentId,
+    url: url.present ? url.value : this.url,
     title: title ?? this.title,
+    position: position ?? this.position,
     createdAt: createdAt ?? this.createdAt,
   );
   Bookmark copyWithCompanion(BookmarksCompanion data) {
     return Bookmark(
       id: data.id.present ? data.id.value : this.id,
+      parentId: data.parentId.present ? data.parentId.value : this.parentId,
       url: data.url.present ? data.url.value : this.url,
       title: data.title.present ? data.title.value : this.title,
+      position: data.position.present ? data.position.value : this.position,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
     );
   }
@@ -204,68 +282,86 @@ class Bookmark extends DataClass implements Insertable<Bookmark> {
   String toString() {
     return (StringBuffer('Bookmark(')
           ..write('id: $id, ')
+          ..write('parentId: $parentId, ')
           ..write('url: $url, ')
           ..write('title: $title, ')
+          ..write('position: $position, ')
           ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, url, title, createdAt);
+  int get hashCode =>
+      Object.hash(id, parentId, url, title, position, createdAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is Bookmark &&
           other.id == this.id &&
+          other.parentId == this.parentId &&
           other.url == this.url &&
           other.title == this.title &&
+          other.position == this.position &&
           other.createdAt == this.createdAt);
 }
 
 class BookmarksCompanion extends UpdateCompanion<Bookmark> {
   final Value<int> id;
-  final Value<String> url;
+  final Value<int?> parentId;
+  final Value<String?> url;
   final Value<String> title;
+  final Value<int> position;
   final Value<DateTime> createdAt;
   const BookmarksCompanion({
     this.id = const Value.absent(),
+    this.parentId = const Value.absent(),
     this.url = const Value.absent(),
     this.title = const Value.absent(),
+    this.position = const Value.absent(),
     this.createdAt = const Value.absent(),
   });
   BookmarksCompanion.insert({
     this.id = const Value.absent(),
-    required String url,
+    this.parentId = const Value.absent(),
+    this.url = const Value.absent(),
     required String title,
+    this.position = const Value.absent(),
     required DateTime createdAt,
-  }) : url = Value(url),
-       title = Value(title),
+  }) : title = Value(title),
        createdAt = Value(createdAt);
   static Insertable<Bookmark> custom({
     Expression<int>? id,
+    Expression<int>? parentId,
     Expression<String>? url,
     Expression<String>? title,
+    Expression<int>? position,
     Expression<DateTime>? createdAt,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
+      if (parentId != null) 'parent_id': parentId,
       if (url != null) 'url': url,
       if (title != null) 'title': title,
+      if (position != null) 'position': position,
       if (createdAt != null) 'created_at': createdAt,
     });
   }
 
   BookmarksCompanion copyWith({
     Value<int>? id,
-    Value<String>? url,
+    Value<int?>? parentId,
+    Value<String?>? url,
     Value<String>? title,
+    Value<int>? position,
     Value<DateTime>? createdAt,
   }) {
     return BookmarksCompanion(
       id: id ?? this.id,
+      parentId: parentId ?? this.parentId,
       url: url ?? this.url,
       title: title ?? this.title,
+      position: position ?? this.position,
       createdAt: createdAt ?? this.createdAt,
     );
   }
@@ -276,11 +372,17 @@ class BookmarksCompanion extends UpdateCompanion<Bookmark> {
     if (id.present) {
       map['id'] = Variable<int>(id.value);
     }
+    if (parentId.present) {
+      map['parent_id'] = Variable<int>(parentId.value);
+    }
     if (url.present) {
       map['url'] = Variable<String>(url.value);
     }
     if (title.present) {
       map['title'] = Variable<String>(title.value);
+    }
+    if (position.present) {
+      map['position'] = Variable<int>(position.value);
     }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
@@ -292,8 +394,10 @@ class BookmarksCompanion extends UpdateCompanion<Bookmark> {
   String toString() {
     return (StringBuffer('BookmarksCompanion(')
           ..write('id: $id, ')
+          ..write('parentId: $parentId, ')
           ..write('url: $url, ')
           ..write('title: $title, ')
+          ..write('position: $position, ')
           ..write('createdAt: $createdAt')
           ..write(')'))
         .toString();
@@ -1748,6 +1852,633 @@ class HiddenSitesCompanion extends UpdateCompanion<HiddenSite> {
   }
 }
 
+class $LoginsTable extends Logins with TableInfo<$LoginsTable, Login> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LoginsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _originMeta = const VerificationMeta('origin');
+  @override
+  late final GeneratedColumn<String> origin = GeneratedColumn<String>(
+    'origin',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _usernameMeta = const VerificationMeta(
+    'username',
+  );
+  @override
+  late final GeneratedColumn<String> username = GeneratedColumn<String>(
+    'username',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _passwordMeta = const VerificationMeta(
+    'password',
+  );
+  @override
+  late final GeneratedColumn<Uint8List> password = GeneratedColumn<Uint8List>(
+    'password',
+    aliasedName,
+    false,
+    type: DriftSqlType.blob,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _lastUsedAtMeta = const VerificationMeta(
+    'lastUsedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> lastUsedAt = GeneratedColumn<DateTime>(
+    'last_used_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    origin,
+    username,
+    password,
+    createdAt,
+    updatedAt,
+    lastUsedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'logins';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<Login> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('origin')) {
+      context.handle(
+        _originMeta,
+        origin.isAcceptableOrUnknown(data['origin']!, _originMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_originMeta);
+    }
+    if (data.containsKey('username')) {
+      context.handle(
+        _usernameMeta,
+        username.isAcceptableOrUnknown(data['username']!, _usernameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_usernameMeta);
+    }
+    if (data.containsKey('password')) {
+      context.handle(
+        _passwordMeta,
+        password.isAcceptableOrUnknown(data['password']!, _passwordMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_passwordMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    if (data.containsKey('last_used_at')) {
+      context.handle(
+        _lastUsedAtMeta,
+        lastUsedAt.isAcceptableOrUnknown(
+          data['last_used_at']!,
+          _lastUsedAtMeta,
+        ),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  List<Set<GeneratedColumn>> get uniqueKeys => [
+    {origin, username},
+  ];
+  @override
+  Login map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return Login(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      origin: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}origin'],
+      )!,
+      username: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}username'],
+      )!,
+      password: attachedDatabase.typeMapping.read(
+        DriftSqlType.blob,
+        data['${effectivePrefix}password'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+      lastUsedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}last_used_at'],
+      ),
+    );
+  }
+
+  @override
+  $LoginsTable createAlias(String alias) {
+    return $LoginsTable(attachedDatabase, alias);
+  }
+}
+
+class Login extends DataClass implements Insertable<Login> {
+  final int id;
+  final String origin;
+  final String username;
+  final Uint8List password;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final DateTime? lastUsedAt;
+  const Login({
+    required this.id,
+    required this.origin,
+    required this.username,
+    required this.password,
+    required this.createdAt,
+    required this.updatedAt,
+    this.lastUsedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['origin'] = Variable<String>(origin);
+    map['username'] = Variable<String>(username);
+    map['password'] = Variable<Uint8List>(password);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || lastUsedAt != null) {
+      map['last_used_at'] = Variable<DateTime>(lastUsedAt);
+    }
+    return map;
+  }
+
+  LoginsCompanion toCompanion(bool nullToAbsent) {
+    return LoginsCompanion(
+      id: Value(id),
+      origin: Value(origin),
+      username: Value(username),
+      password: Value(password),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+      lastUsedAt: lastUsedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lastUsedAt),
+    );
+  }
+
+  factory Login.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return Login(
+      id: serializer.fromJson<int>(json['id']),
+      origin: serializer.fromJson<String>(json['origin']),
+      username: serializer.fromJson<String>(json['username']),
+      password: serializer.fromJson<Uint8List>(json['password']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      lastUsedAt: serializer.fromJson<DateTime?>(json['lastUsedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'origin': serializer.toJson<String>(origin),
+      'username': serializer.toJson<String>(username),
+      'password': serializer.toJson<Uint8List>(password),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'lastUsedAt': serializer.toJson<DateTime?>(lastUsedAt),
+    };
+  }
+
+  Login copyWith({
+    int? id,
+    String? origin,
+    String? username,
+    Uint8List? password,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    Value<DateTime?> lastUsedAt = const Value.absent(),
+  }) => Login(
+    id: id ?? this.id,
+    origin: origin ?? this.origin,
+    username: username ?? this.username,
+    password: password ?? this.password,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+    lastUsedAt: lastUsedAt.present ? lastUsedAt.value : this.lastUsedAt,
+  );
+  Login copyWithCompanion(LoginsCompanion data) {
+    return Login(
+      id: data.id.present ? data.id.value : this.id,
+      origin: data.origin.present ? data.origin.value : this.origin,
+      username: data.username.present ? data.username.value : this.username,
+      password: data.password.present ? data.password.value : this.password,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      lastUsedAt: data.lastUsedAt.present
+          ? data.lastUsedAt.value
+          : this.lastUsedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('Login(')
+          ..write('id: $id, ')
+          ..write('origin: $origin, ')
+          ..write('username: $username, ')
+          ..write('password: $password, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('lastUsedAt: $lastUsedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    origin,
+    username,
+    $driftBlobEquality.hash(password),
+    createdAt,
+    updatedAt,
+    lastUsedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is Login &&
+          other.id == this.id &&
+          other.origin == this.origin &&
+          other.username == this.username &&
+          $driftBlobEquality.equals(other.password, this.password) &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt &&
+          other.lastUsedAt == this.lastUsedAt);
+}
+
+class LoginsCompanion extends UpdateCompanion<Login> {
+  final Value<int> id;
+  final Value<String> origin;
+  final Value<String> username;
+  final Value<Uint8List> password;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  final Value<DateTime?> lastUsedAt;
+  const LoginsCompanion({
+    this.id = const Value.absent(),
+    this.origin = const Value.absent(),
+    this.username = const Value.absent(),
+    this.password = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.lastUsedAt = const Value.absent(),
+  });
+  LoginsCompanion.insert({
+    this.id = const Value.absent(),
+    required String origin,
+    required String username,
+    required Uint8List password,
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    this.lastUsedAt = const Value.absent(),
+  }) : origin = Value(origin),
+       username = Value(username),
+       password = Value(password),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<Login> custom({
+    Expression<int>? id,
+    Expression<String>? origin,
+    Expression<String>? username,
+    Expression<Uint8List>? password,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+    Expression<DateTime>? lastUsedAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (origin != null) 'origin': origin,
+      if (username != null) 'username': username,
+      if (password != null) 'password': password,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (lastUsedAt != null) 'last_used_at': lastUsedAt,
+    });
+  }
+
+  LoginsCompanion copyWith({
+    Value<int>? id,
+    Value<String>? origin,
+    Value<String>? username,
+    Value<Uint8List>? password,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
+    Value<DateTime?>? lastUsedAt,
+  }) {
+    return LoginsCompanion(
+      id: id ?? this.id,
+      origin: origin ?? this.origin,
+      username: username ?? this.username,
+      password: password ?? this.password,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      lastUsedAt: lastUsedAt ?? this.lastUsedAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (origin.present) {
+      map['origin'] = Variable<String>(origin.value);
+    }
+    if (username.present) {
+      map['username'] = Variable<String>(username.value);
+    }
+    if (password.present) {
+      map['password'] = Variable<Uint8List>(password.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (lastUsedAt.present) {
+      map['last_used_at'] = Variable<DateTime>(lastUsedAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LoginsCompanion(')
+          ..write('id: $id, ')
+          ..write('origin: $origin, ')
+          ..write('username: $username, ')
+          ..write('password: $password, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('lastUsedAt: $lastUsedAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $NeverSavePasswordsTable extends NeverSavePasswords
+    with TableInfo<$NeverSavePasswordsTable, NeverSavePassword> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $NeverSavePasswordsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _originMeta = const VerificationMeta('origin');
+  @override
+  late final GeneratedColumn<String> origin = GeneratedColumn<String>(
+    'origin',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [origin];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'never_save_passwords';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<NeverSavePassword> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('origin')) {
+      context.handle(
+        _originMeta,
+        origin.isAcceptableOrUnknown(data['origin']!, _originMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_originMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {origin};
+  @override
+  NeverSavePassword map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return NeverSavePassword(
+      origin: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}origin'],
+      )!,
+    );
+  }
+
+  @override
+  $NeverSavePasswordsTable createAlias(String alias) {
+    return $NeverSavePasswordsTable(attachedDatabase, alias);
+  }
+}
+
+class NeverSavePassword extends DataClass
+    implements Insertable<NeverSavePassword> {
+  final String origin;
+  const NeverSavePassword({required this.origin});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['origin'] = Variable<String>(origin);
+    return map;
+  }
+
+  NeverSavePasswordsCompanion toCompanion(bool nullToAbsent) {
+    return NeverSavePasswordsCompanion(origin: Value(origin));
+  }
+
+  factory NeverSavePassword.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return NeverSavePassword(
+      origin: serializer.fromJson<String>(json['origin']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{'origin': serializer.toJson<String>(origin)};
+  }
+
+  NeverSavePassword copyWith({String? origin}) =>
+      NeverSavePassword(origin: origin ?? this.origin);
+  NeverSavePassword copyWithCompanion(NeverSavePasswordsCompanion data) {
+    return NeverSavePassword(
+      origin: data.origin.present ? data.origin.value : this.origin,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('NeverSavePassword(')
+          ..write('origin: $origin')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => origin.hashCode;
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is NeverSavePassword && other.origin == this.origin);
+}
+
+class NeverSavePasswordsCompanion extends UpdateCompanion<NeverSavePassword> {
+  final Value<String> origin;
+  final Value<int> rowid;
+  const NeverSavePasswordsCompanion({
+    this.origin = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  NeverSavePasswordsCompanion.insert({
+    required String origin,
+    this.rowid = const Value.absent(),
+  }) : origin = Value(origin);
+  static Insertable<NeverSavePassword> custom({
+    Expression<String>? origin,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (origin != null) 'origin': origin,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  NeverSavePasswordsCompanion copyWith({
+    Value<String>? origin,
+    Value<int>? rowid,
+  }) {
+    return NeverSavePasswordsCompanion(
+      origin: origin ?? this.origin,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (origin.present) {
+      map['origin'] = Variable<String>(origin.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('NeverSavePasswordsCompanion(')
+          ..write('origin: $origin, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -1757,6 +2488,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $DownloadsTable downloads = $DownloadsTable(this);
   late final $ShortcutsTable shortcuts = $ShortcutsTable(this);
   late final $HiddenSitesTable hiddenSites = $HiddenSitesTable(this);
+  late final $LoginsTable logins = $LoginsTable(this);
+  late final $NeverSavePasswordsTable neverSavePasswords =
+      $NeverSavePasswordsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -1768,19 +2502,25 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     downloads,
     shortcuts,
     hiddenSites,
+    logins,
+    neverSavePasswords,
   ];
 }
 
 typedef $$BookmarksTableCreateCompanionBuilder = BookmarksCompanion Function({
   Value<int> id,
-  required String url,
+  Value<int?> parentId,
+  Value<String?> url,
   required String title,
+  Value<int> position,
   required DateTime createdAt,
 });
 typedef $$BookmarksTableUpdateCompanionBuilder = BookmarksCompanion Function({
   Value<int> id,
-  Value<String> url,
+  Value<int?> parentId,
+  Value<String?> url,
   Value<String> title,
+  Value<int> position,
   Value<DateTime> createdAt,
 });
 
@@ -1798,6 +2538,11 @@ class $$BookmarksTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<int> get parentId => $composableBuilder(
+    column: $table.parentId,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<String> get url => $composableBuilder(
     column: $table.url,
     builder: (column) => ColumnFilters(column),
@@ -1805,6 +2550,11 @@ class $$BookmarksTableFilterComposer
 
   ColumnFilters<String> get title => $composableBuilder(
     column: $table.title,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get position => $composableBuilder(
+    column: $table.position,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -1828,6 +2578,11 @@ class $$BookmarksTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get parentId => $composableBuilder(
+    column: $table.parentId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get url => $composableBuilder(
     column: $table.url,
     builder: (column) => ColumnOrderings(column),
@@ -1835,6 +2590,11 @@ class $$BookmarksTableOrderingComposer
 
   ColumnOrderings<String> get title => $composableBuilder(
     column: $table.title,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get position => $composableBuilder(
+    column: $table.position,
     builder: (column) => ColumnOrderings(column),
   );
 
@@ -1856,11 +2616,17 @@ class $$BookmarksTableAnnotationComposer
   GeneratedColumn<int> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
 
+  GeneratedColumn<int> get parentId =>
+      $composableBuilder(column: $table.parentId, builder: (column) => column);
+
   GeneratedColumn<String> get url =>
       $composableBuilder(column: $table.url, builder: (column) => column);
 
   GeneratedColumn<String> get title =>
       $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<int> get position =>
+      $composableBuilder(column: $table.position, builder: (column) => column);
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
@@ -1895,25 +2661,33 @@ class $$BookmarksTableTableManager
           updateCompanionCallback:
               ({
                 Value<int> id = const Value.absent(),
-                Value<String> url = const Value.absent(),
+                Value<int?> parentId = const Value.absent(),
+                Value<String?> url = const Value.absent(),
                 Value<String> title = const Value.absent(),
+                Value<int> position = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
               }) => BookmarksCompanion(
                 id: id,
+                parentId: parentId,
                 url: url,
                 title: title,
+                position: position,
                 createdAt: createdAt,
               ),
           createCompanionCallback:
               ({
                 Value<int> id = const Value.absent(),
-                required String url,
+                Value<int?> parentId = const Value.absent(),
+                Value<String?> url = const Value.absent(),
                 required String title,
+                Value<int> position = const Value.absent(),
                 required DateTime createdAt,
               }) => BookmarksCompanion.insert(
                 id: id,
+                parentId: parentId,
                 url: url,
                 title: title,
+                position: position,
                 createdAt: createdAt,
               ),
           withReferenceMapper: (p0) => p0
@@ -2818,6 +3592,385 @@ typedef $$HiddenSitesTableProcessedTableManager =
       HiddenSite,
       PrefetchHooks Function()
     >;
+typedef $$LoginsTableCreateCompanionBuilder = LoginsCompanion Function({
+  Value<int> id,
+  required String origin,
+  required String username,
+  required Uint8List password,
+  required DateTime createdAt,
+  required DateTime updatedAt,
+  Value<DateTime?> lastUsedAt,
+});
+typedef $$LoginsTableUpdateCompanionBuilder = LoginsCompanion Function({
+  Value<int> id,
+  Value<String> origin,
+  Value<String> username,
+  Value<Uint8List> password,
+  Value<DateTime> createdAt,
+  Value<DateTime> updatedAt,
+  Value<DateTime?> lastUsedAt,
+});
+
+class $$LoginsTableFilterComposer
+    extends Composer<_$AppDatabase, $LoginsTable> {
+  $$LoginsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get origin => $composableBuilder(
+    column: $table.origin,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get username => $composableBuilder(
+    column: $table.username,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<Uint8List> get password => $composableBuilder(
+    column: $table.password,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get lastUsedAt => $composableBuilder(
+    column: $table.lastUsedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$LoginsTableOrderingComposer
+    extends Composer<_$AppDatabase, $LoginsTable> {
+  $$LoginsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get origin => $composableBuilder(
+    column: $table.origin,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get username => $composableBuilder(
+    column: $table.username,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<Uint8List> get password => $composableBuilder(
+    column: $table.password,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get lastUsedAt => $composableBuilder(
+    column: $table.lastUsedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$LoginsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $LoginsTable> {
+  $$LoginsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get origin =>
+      $composableBuilder(column: $table.origin, builder: (column) => column);
+
+  GeneratedColumn<String> get username =>
+      $composableBuilder(column: $table.username, builder: (column) => column);
+
+  GeneratedColumn<Uint8List> get password =>
+      $composableBuilder(column: $table.password, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get lastUsedAt => $composableBuilder(
+    column: $table.lastUsedAt,
+    builder: (column) => column,
+  );
+}
+
+class $$LoginsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $LoginsTable,
+          Login,
+          $$LoginsTableFilterComposer,
+          $$LoginsTableOrderingComposer,
+          $$LoginsTableAnnotationComposer,
+          $$LoginsTableCreateCompanionBuilder,
+          $$LoginsTableUpdateCompanionBuilder,
+          (Login, BaseReferences<_$AppDatabase, $LoginsTable, Login>),
+          Login,
+          PrefetchHooks Function()
+        > {
+  $$LoginsTableTableManager(_$AppDatabase db, $LoginsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LoginsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$LoginsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$LoginsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<String> origin = const Value.absent(),
+                Value<String> username = const Value.absent(),
+                Value<Uint8List> password = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> lastUsedAt = const Value.absent(),
+              }) => LoginsCompanion(
+                id: id,
+                origin: origin,
+                username: username,
+                password: password,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                lastUsedAt: lastUsedAt,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required String origin,
+                required String username,
+                required Uint8List password,
+                required DateTime createdAt,
+                required DateTime updatedAt,
+                Value<DateTime?> lastUsedAt = const Value.absent(),
+              }) => LoginsCompanion.insert(
+                id: id,
+                origin: origin,
+                username: username,
+                password: password,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                lastUsedAt: lastUsedAt,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$LoginsTable, Login>(table),
+                  BaseReferences<_$AppDatabase, $LoginsTable, Login>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$LoginsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $LoginsTable,
+      Login,
+      $$LoginsTableFilterComposer,
+      $$LoginsTableOrderingComposer,
+      $$LoginsTableAnnotationComposer,
+      $$LoginsTableCreateCompanionBuilder,
+      $$LoginsTableUpdateCompanionBuilder,
+      (Login, BaseReferences<_$AppDatabase, $LoginsTable, Login>),
+      Login,
+      PrefetchHooks Function()
+    >;
+typedef $$NeverSavePasswordsTableCreateCompanionBuilder =
+    NeverSavePasswordsCompanion Function({
+      required String origin,
+      Value<int> rowid,
+    });
+typedef $$NeverSavePasswordsTableUpdateCompanionBuilder =
+    NeverSavePasswordsCompanion Function({
+      Value<String> origin,
+      Value<int> rowid,
+    });
+
+class $$NeverSavePasswordsTableFilterComposer
+    extends Composer<_$AppDatabase, $NeverSavePasswordsTable> {
+  $$NeverSavePasswordsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get origin => $composableBuilder(
+    column: $table.origin,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$NeverSavePasswordsTableOrderingComposer
+    extends Composer<_$AppDatabase, $NeverSavePasswordsTable> {
+  $$NeverSavePasswordsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get origin => $composableBuilder(
+    column: $table.origin,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$NeverSavePasswordsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $NeverSavePasswordsTable> {
+  $$NeverSavePasswordsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get origin =>
+      $composableBuilder(column: $table.origin, builder: (column) => column);
+}
+
+class $$NeverSavePasswordsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $NeverSavePasswordsTable,
+          NeverSavePassword,
+          $$NeverSavePasswordsTableFilterComposer,
+          $$NeverSavePasswordsTableOrderingComposer,
+          $$NeverSavePasswordsTableAnnotationComposer,
+          $$NeverSavePasswordsTableCreateCompanionBuilder,
+          $$NeverSavePasswordsTableUpdateCompanionBuilder,
+          (
+            NeverSavePassword,
+            BaseReferences<
+              _$AppDatabase,
+              $NeverSavePasswordsTable,
+              NeverSavePassword
+            >,
+          ),
+          NeverSavePassword,
+          PrefetchHooks Function()
+        > {
+  $$NeverSavePasswordsTableTableManager(
+    _$AppDatabase db,
+    $NeverSavePasswordsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$NeverSavePasswordsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$NeverSavePasswordsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$NeverSavePasswordsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback: ({
+            Value<String> origin = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) => NeverSavePasswordsCompanion(origin: origin, rowid: rowid),
+          createCompanionCallback:
+              ({
+                required String origin,
+                Value<int> rowid = const Value.absent(),
+              }) => NeverSavePasswordsCompanion.insert(
+                origin: origin,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$NeverSavePasswordsTable, NeverSavePassword>(
+                    table,
+                  ),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $NeverSavePasswordsTable,
+                    NeverSavePassword
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$NeverSavePasswordsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $NeverSavePasswordsTable,
+      NeverSavePassword,
+      $$NeverSavePasswordsTableFilterComposer,
+      $$NeverSavePasswordsTableOrderingComposer,
+      $$NeverSavePasswordsTableAnnotationComposer,
+      $$NeverSavePasswordsTableCreateCompanionBuilder,
+      $$NeverSavePasswordsTableUpdateCompanionBuilder,
+      (
+        NeverSavePassword,
+        BaseReferences<
+          _$AppDatabase,
+          $NeverSavePasswordsTable,
+          NeverSavePassword
+        >,
+      ),
+      NeverSavePassword,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -2834,4 +3987,8 @@ class $AppDatabaseManager {
       $$ShortcutsTableTableManager(_db, _db.shortcuts);
   $$HiddenSitesTableTableManager get hiddenSites =>
       $$HiddenSitesTableTableManager(_db, _db.hiddenSites);
+  $$LoginsTableTableManager get logins =>
+      $$LoginsTableTableManager(_db, _db.logins);
+  $$NeverSavePasswordsTableTableManager get neverSavePasswords =>
+      $$NeverSavePasswordsTableTableManager(_db, _db.neverSavePasswords);
 }

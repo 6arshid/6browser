@@ -58,6 +58,63 @@ class WindowCaption {
     }
   }
 
+  /// Sets the window title (shown in the taskbar), e.g. the profile name.
+  static void setTitle(String title) {
+    if (!Platform.isWindows) return;
+    try {
+      final hwnd = findWindow();
+      if (hwnd == 0) return;
+      final text = title.toNativeUtf16();
+      try {
+        _user32.lookupFunction<
+          Int32 Function(IntPtr, Pointer<Utf16>),
+          int Function(int, Pointer<Utf16>)
+        >('SetWindowTextW')(hwnd, text);
+      } finally {
+        calloc.free(text);
+      }
+    } on Object {
+      // Keep the old title.
+    }
+  }
+
+  /// Restores and raises this window, e.g. when a link is opened from
+  /// another app while 6browser runs.
+  static void bringToFront() {
+    if (!Platform.isWindows) return;
+    try {
+      final hwnd = findWindow();
+      if (hwnd == 0) return;
+      final isIconic = _user32
+          .lookupFunction<Int32 Function(IntPtr), int Function(int)>(
+            'IsIconic',
+          );
+      final showWindow = _user32
+          .lookupFunction<
+            Int32 Function(IntPtr, Int32),
+            int Function(int, int)
+          >('ShowWindow');
+      if (isIconic(hwnd) != 0) showWindow(hwnd, 9); // SW_RESTORE
+      _user32.lookupFunction<Int32 Function(IntPtr), int Function(int)>(
+        'SetForegroundWindow',
+      )(hwnd);
+    } on Object {
+      // Windows may refuse; the taskbar button flashes instead.
+    }
+  }
+
+  /// Lets the 6browser window this process hands over to come to the front.
+  static void allowOthersToFocus() {
+    if (!Platform.isWindows) return;
+    try {
+      _user32.lookupFunction<Int32 Function(Uint32), int Function(int)>(
+        'AllowSetForegroundWindow',
+      )(0xFFFFFFFF); // ASFW_ANY
+    } on Object {
+      // Not important.
+    }
+  }
+
   /// The runner's top-level window in this process.
   static int findWindow() => _hwnd ??= _findWindow();
 

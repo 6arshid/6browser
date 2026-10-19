@@ -43,14 +43,22 @@ class BrowserProfile {
 }
 
 class ImportedBookmark {
-  const ImportedBookmark({required this.url, required this.title, this.folder});
+  const ImportedBookmark({
+    required this.url,
+    required this.title,
+    this.folders = const [],
+  });
 
   final String url;
   final String title;
 
-  /// Slash-joined folder path in the source browser, or null for the root.
-  final String? folder;
+  /// Folder names from the bookmarks bar down to this bookmark; empty for a
+  /// bookmark on the bar itself.
+  final List<String> folders;
 }
+
+/// Where bookmarks that were outside the source browser's bookmarks bar go.
+const otherBookmarksFolder = 'Other bookmarks';
 
 class ImportedLogin {
   const ImportedLogin({

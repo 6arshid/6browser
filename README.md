@@ -13,7 +13,9 @@ A desktop web browser with a Flutter UI on top of the Chromium engine (CEF).
 | Address bar: search or URL, HTTPS lock, history autocomplete | Works |
 | Back / forward / reload / home, DevTools (F12) | Works |
 | Stop-loading button | Not available (engine has no API) |
-| Bookmarks (star in the address bar), history (search, delete, clear) | Works |
+| Bookmarks with folders (star in the address bar, bookmarks bar, manager), drag and drop to reorder or file them; importing keeps the other browser's folders. History (search, delete, clear) | Works |
+| Profiles: each with its own bookmarks, history, settings, passwords and site data, each in its own window | Desktop (tested on Windows); not on Android |
+| Saved passwords: offer to save after signing in, fill in on sign-in pages, manager under Settings (Windows Hello before showing a password), import from Chrome/Edge/Brave | Windows (DPAPI) and Android (Keystore); not yet on macOS/Linux |
 | Downloads manager (progress, open, show in folder) | Works on Windows; no pause/cancel |
 | Settings: theme (system/light/dark), search engine, home page | Works |
 | Persistent profile (cookies, localStorage, cache) | Works on Windows |
@@ -509,7 +511,11 @@ ad-hoc دارد و Developer ID و notarization انجام نمی‌دهد. بر
 - Browser profile (cookies, cache, localStorage):
   `%APPDATA%\6arshid\6browser\cef_profile`
 
-Only one 6browser instance can use the profile at a time.
+These are the Default profile's. Other profiles keep the same files in
+`%APPDATA%\6arshid\6browser\profiles\<id>\`; the list is `profiles.json`.
+Each profile runs in one window (one process): launching 6browser again
+for an open profile (`6browser.exe --profile=<id> [url]`) hands the URL to
+that window.
 
 ## Project layout
 

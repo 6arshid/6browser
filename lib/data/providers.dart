@@ -1,10 +1,16 @@
+import 'dart:io';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'database.dart';
 
+/// The browser profile's data folder (database, themes, site data); null
+/// for the app data folder. Set in main() on desktop.
+final dataDirProvider = Provider<Directory?>((ref) => null);
+
 /// The app database. Tests override this with [AppDatabase.inMemory].
 final databaseProvider = Provider<AppDatabase>((ref) {
-  final db = AppDatabase.persistent();
+  final db = AppDatabase.persistent(ref.watch(dataDirProvider));
   ref.onDispose(db.close);
   return db;
 });

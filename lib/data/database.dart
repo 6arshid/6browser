@@ -7,10 +7,19 @@ import 'package:path_provider/path_provider.dart';
 
 part 'database.g.dart';
 
+/// Bookmarks and bookmark folders, as a tree under the bookmarks bar.
 class Bookmarks extends Table {
   IntColumn get id => integer().autoIncrement()();
-  TextColumn get url => text().unique()();
+
+  /// The folder holding this item; null for items on the bookmarks bar.
+  IntColumn get parentId => integer().nullable()();
+
+  /// The page address; null for a folder.
+  TextColumn get url => text().nullable().unique()();
   TextColumn get title => text()();
+
+  /// Order among the items of the same folder.
+  IntColumn get position => integer().withDefault(const Constant(0))();
   DateTimeColumn get createdAt => dateTime()();
 }
 
@@ -66,6 +75,31 @@ class HiddenSites extends Table {
   Set<Column> get primaryKey => {url};
 }
 
+/// Saved sign-ins. [password] is encrypted with the device user's key (see
+/// SecretBox); [origin] is the sign-in page's scheme, host and port.
+class Logins extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get origin => text()();
+  TextColumn get username => text()();
+  BlobColumn get password => blob()();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+  DateTimeColumn get lastUsedAt => dateTime().nullable()();
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+    {origin, username},
+  ];
+}
+
+/// Sites where the user chose "Never" when offered to save a password.
+class NeverSavePasswords extends Table {
+  TextColumn get origin => text()();
+
+  @override
+  Set<Column> get primaryKey => {origin};
+}
+
 /// A frequently visited page (aggregated from history).
 class TopSite {
   const TopSite({required this.url, required this.title, required this.visits});
@@ -82,16 +116,20 @@ class TopSite {
     Downloads,
     Shortcuts,
     HiddenSites,
+    Logins,
+    NeverSavePasswords,
   ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
-  /// Opens the persistent database inside the user's profile directory.
-  factory AppDatabase.persistent() => AppDatabase(
+  /// Opens the persistent database in [dir] (the browser profile's folder),
+  /// or in the app data folder.
+  factory AppDatabase.persistent([Directory? dir]) => AppDatabase(
     LazyDatabase(() async {
-      final dir = await getApplicationSupportDirectory();
-      final file = File(p.join(dir.path, '6browser.sqlite'));
+      final folder = dir ?? await getApplicationSupportDirectory();
+      await folder.create(recursive: true);
+      final file = File(p.join(folder.path, '6browser.sqlite'));
       return NativeDatabase.createInBackground(file);
     }),
   );
@@ -100,7 +138,7 @@ class AppDatabase extends _$AppDatabase {
   factory AppDatabase.inMemory() => AppDatabase(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -109,15 +147,35 @@ class AppDatabase extends _$AppDatabase {
         await m.createTable(shortcuts);
         await m.createTable(hiddenSites);
       }
+      if (from < 3) {
+        // Folders: url becomes optional, items get a parent and an order.
+        await m.alterTable(
+          TableMigration(
+            bookmarks,
+            newColumns: [bookmarks.parentId, bookmarks.position],
+          ),
+        );
+        // Keep the bar's old order: oldest first.
+        await customStatement(
+          'UPDATE bookmarks SET position = (SELECT COUNT(*) FROM bookmarks b '
+          'WHERE b.created_at < bookmarks.created_at '
+          'OR (b.created_at = bookmarks.created_at AND b.id < bookmarks.id))',
+        );
+      }
+      if (from < 4) {
+        await m.createTable(logins);
+        await m.createTable(neverSavePasswords);
+      }
     },
   );
 
   // ---- bookmarks ----
 
+  /// Every bookmark and folder, each folder's items in display order.
   Stream<List<Bookmark>> watchBookmarks() =>
       (select(bookmarks)..orderBy([
-            (b) => OrderingTerm.desc(b.createdAt),
-            (b) => OrderingTerm.desc(b.id),
+            (b) => OrderingTerm.asc(b.position),
+            (b) => OrderingTerm.asc(b.id),
           ]))
           .watch();
 
@@ -125,51 +183,218 @@ class AppDatabase extends _$AppDatabase {
     bookmarks,
   )..where((b) => b.url.equals(url))).watch().map((r) => r.isNotEmpty);
 
-  Future<void> addBookmark(String url, String title) => into(bookmarks).insert(
-    BookmarksCompanion.insert(
-      url: url,
-      title: title.isEmpty ? url : title,
-      createdAt: DateTime.now(),
-    ),
-    mode: InsertMode.insertOrIgnore,
-  );
+  Future<Bookmark?> bookmarkForUrl(String url) =>
+      (select(bookmarks)..where((b) => b.url.equals(url))).getSingleOrNull();
 
-  /// Bulk-inserts bookmarks, ignoring any whose URL already exists. Returns the
-  /// number of new rows actually added. Used by the browser-import feature.
-  Future<int> addBookmarks(List<({String url, String title})> items) async {
-    if (items.isEmpty) return 0;
-    final now = DateTime.now();
-    final existing = <String>{
-      for (final r in await (selectOnly(
-        bookmarks,
-      )..addColumns([bookmarks.url])).get())
-        r.read(bookmarks.url)!,
-    };
-    // De-dupe within the incoming batch, too.
-    final fresh = <String, String>{};
-    for (final it in items) {
-      if (it.url.isEmpty || existing.contains(it.url)) continue;
-      fresh.putIfAbsent(it.url, () => it.title);
-    }
-    if (fresh.isEmpty) return 0;
-    await batch((b) {
-      b.insertAll(bookmarks, [
-        for (final e in fresh.entries)
-          BookmarksCompanion.insert(
-            url: e.key,
-            title: e.value.isEmpty ? e.key : e.value,
-            createdAt: now,
-          ),
-      ], mode: InsertMode.insertOrIgnore);
-    });
-    return fresh.length;
+  /// The position after the last item in [folderId] (the bar when null).
+  Future<int> _nextPosition(int? folderId) async {
+    final last = bookmarks.position.max();
+    final query = selectOnly(bookmarks)
+      ..addColumns([last])
+      ..where(
+        folderId == null
+            ? bookmarks.parentId.isNull()
+            : bookmarks.parentId.equals(folderId),
+      );
+    return ((await query.map((r) => r.read(last)).getSingle()) ?? -1) + 1;
   }
+
+  /// Adds [url] at the end of [folderId] (the bookmarks bar when null) and
+  /// returns its id. A URL that is already bookmarked stays where it is.
+  Future<int> addBookmark(String url, String title, {int? folderId}) =>
+      transaction(() async {
+        final existing = await bookmarkForUrl(url);
+        if (existing != null) return existing.id;
+        return into(bookmarks).insert(
+          BookmarksCompanion.insert(
+            url: Value(url),
+            title: title.isEmpty ? url : title,
+            parentId: Value(folderId),
+            position: Value(await _nextPosition(folderId)),
+            createdAt: DateTime.now(),
+          ),
+        );
+      });
+
+  /// Creates a folder at the end of [parentId] and returns its id.
+  Future<int> addFolder(String title, {int? parentId}) => transaction(() async {
+    return into(bookmarks).insert(
+      BookmarksCompanion.insert(
+        title: title,
+        parentId: Value(parentId),
+        position: Value(await _nextPosition(parentId)),
+        createdAt: DateTime.now(),
+      ),
+    );
+  });
+
+  /// Adds bookmarks to the end of the bar, ignoring any whose URL already
+  /// exists. Returns the number of new rows actually added.
+  Future<int> addBookmarks(List<({String url, String title})> items) =>
+      transaction(() async {
+        final existing = <String>{
+          for (final r in await (selectOnly(
+            bookmarks,
+          )..addColumns([bookmarks.url])).get())
+            ?r.read(bookmarks.url),
+        };
+        var position = await _nextPosition(null);
+        final now = DateTime.now();
+        var added = 0;
+        for (final it in items) {
+          if (it.url.isEmpty || !existing.add(it.url)) continue;
+          await into(bookmarks).insert(
+            BookmarksCompanion.insert(
+              url: Value(it.url),
+              title: it.title.isEmpty ? it.url : it.title,
+              position: Value(position++),
+              createdAt: now,
+            ),
+          );
+          added++;
+        }
+        return added;
+      });
+
+  /// Adds bookmarks read from another browser, recreating their folders
+  /// (matched by name, so importing twice does not duplicate them). A
+  /// bookmark already saved loose on the bar is moved into its folder; one
+  /// the user filed in a folder is left alone.
+  Future<({int added, int moved})> importBookmarks(
+    List<({String url, String title, List<String> folders})> items,
+  ) => transaction(() async {
+    final all = await select(bookmarks).get();
+    final byUrl = {
+      for (final b in all)
+        if (b.url != null) b.url!: b,
+    };
+    final next = <int?, int>{};
+    for (final b in all) {
+      if (b.position >= (next[b.parentId] ?? 0)) {
+        next[b.parentId] = b.position + 1;
+      }
+    }
+    int take(int? folder) {
+      final position = next[folder] ?? 0;
+      next[folder] = position + 1;
+      return position;
+    }
+
+    final folders = <(int?, String), int>{};
+    for (final b in all) {
+      if (b.url == null) folders.putIfAbsent((b.parentId, b.title), () => b.id);
+    }
+    final now = DateTime.now();
+    Future<int?> folderFor(List<String> path) async {
+      int? parent;
+      for (final name in path) {
+        final key = (parent, name);
+        parent =
+            folders[key] ??
+            (folders[key] = await into(bookmarks).insert(
+              BookmarksCompanion.insert(
+                title: name,
+                parentId: Value(parent),
+                position: Value(take(parent)),
+                createdAt: now,
+              ),
+            ));
+      }
+      return parent;
+    }
+
+    final seen = <String>{};
+    var added = 0, moved = 0;
+    for (final it in items) {
+      if (it.url.isEmpty || !seen.add(it.url)) continue;
+      final existing = byUrl[it.url];
+      if (existing != null) {
+        if (existing.parentId == null && it.folders.isNotEmpty) {
+          final parent = await folderFor(it.folders);
+          await (update(
+            bookmarks,
+          )..where((b) => b.id.equals(existing.id))).write(
+            BookmarksCompanion(
+              parentId: Value(parent),
+              position: Value(take(parent)),
+            ),
+          );
+          moved++;
+        }
+        continue;
+      }
+      final parent = await folderFor(it.folders);
+      await into(bookmarks).insert(
+        BookmarksCompanion.insert(
+          url: Value(it.url),
+          title: it.title.isEmpty ? it.url : it.title,
+          parentId: Value(parent),
+          position: Value(take(parent)),
+          createdAt: now,
+        ),
+      );
+      added++;
+    }
+    return (added: added, moved: moved);
+  });
+
+  /// Moves [id] into [folderId] (the bar when null), before the item
+  /// [beforeId] there, or to the end when [beforeId] is null. Moving a
+  /// folder into itself or into one of its subfolders does nothing.
+  Future<void> moveBookmark(int id, {int? folderId, int? beforeId}) =>
+      transaction(() async {
+        final all = await select(bookmarks).get();
+        final byId = {for (final b in all) b.id: b};
+        final item = byId[id];
+        if (item == null || beforeId == id) return;
+        for (int? f = folderId; f != null; f = byId[f]?.parentId) {
+          if (f == id) return;
+        }
+        List<Bookmark> itemsIn(int? folder) =>
+            all.where((b) => b.parentId == folder && b.id != id).toList()..sort(
+              (a, b) => a.position != b.position
+                  ? a.position.compareTo(b.position)
+                  : a.id.compareTo(b.id),
+            );
+        Future<void> renumber(List<Bookmark> list, int? folder) async {
+          for (final (i, b) in list.indexed) {
+            if (b.id == id || b.position != i) {
+              await (update(bookmarks)..where((t) => t.id.equals(b.id))).write(
+                BookmarksCompanion(parentId: Value(folder), position: Value(i)),
+              );
+            }
+          }
+        }
+
+        final target = itemsIn(folderId);
+        final at = target.indexWhere((b) => b.id == beforeId);
+        target.insert(at < 0 ? target.length : at, item);
+        await renumber(target, folderId);
+        if (item.parentId != folderId) {
+          await renumber(itemsIn(item.parentId), item.parentId);
+        }
+      });
 
   Future<void> removeBookmarkByUrl(String url) =>
       (delete(bookmarks)..where((b) => b.url.equals(url))).go();
 
-  Future<void> removeBookmark(int id) =>
-      (delete(bookmarks)..where((b) => b.id.equals(id))).go();
+  /// Deletes a bookmark, or a folder with everything in it.
+  Future<void> removeBookmark(int id) => transaction(() async {
+    final all = await select(bookmarks).get();
+    final doomed = {id};
+    for (var grew = true; grew;) {
+      grew = false;
+      for (final b in all) {
+        if (doomed.contains(b.parentId) && doomed.add(b.id)) grew = true;
+      }
+    }
+    await (delete(bookmarks)..where((b) => b.id.isIn(doomed))).go();
+  });
+
+  Future<void> renameBookmark(int id, String title) =>
+      (update(bookmarks)..where((b) => b.id.equals(id))).write(
+        BookmarksCompanion(title: Value(title)),
+      );
 
   // ---- history ----
 
@@ -304,6 +529,94 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> unhideSite(String url) =>
       (delete(hiddenSites)..where((h) => h.url.equals(url))).go();
+
+  // ---- saved passwords ----
+
+  Stream<List<Login>> watchLogins() =>
+      (select(logins)..orderBy([
+            (l) => OrderingTerm.asc(l.origin),
+            (l) => OrderingTerm.asc(l.username),
+          ]))
+          .watch();
+
+  /// Sign-ins for [origin], the most recently used first.
+  Future<List<Login>> loginsFor(String origin) =>
+      (select(logins)
+            ..where((l) => l.origin.equals(origin))
+            ..orderBy([
+              (l) => OrderingTerm(
+                expression: l.lastUsedAt,
+                mode: OrderingMode.desc,
+                nulls: NullsOrder.last,
+              ),
+              (l) => OrderingTerm.desc(l.updatedAt),
+            ]))
+          .get();
+
+  /// Saves the (already encrypted) [password] for [username] on [origin],
+  /// replacing the one saved before for that user name.
+  Future<void> saveLogin(String origin, String username, Uint8List password) {
+    final now = DateTime.now();
+    return into(logins).insert(
+      LoginsCompanion.insert(
+        origin: origin,
+        username: username,
+        password: password,
+        createdAt: now,
+        updatedAt: now,
+        lastUsedAt: Value(now),
+      ),
+      onConflict: DoUpdate(
+        (_) => LoginsCompanion(
+          password: Value(password),
+          updatedAt: Value(now),
+          lastUsedAt: Value(now),
+        ),
+        target: [logins.origin, logins.username],
+      ),
+    );
+  }
+
+  /// Changes a saved sign-in; [password] is encrypted.
+  Future<void> updateLogin(int id, {String? username, Uint8List? password}) =>
+      (update(logins)..where((l) => l.id.equals(id))).write(
+        LoginsCompanion(
+          username: username == null ? const Value.absent() : Value(username),
+          password: password == null ? const Value.absent() : Value(password),
+          updatedAt: Value(DateTime.now()),
+        ),
+      );
+
+  Future<void> touchLogin(int id) =>
+      (update(logins)..where((l) => l.id.equals(id))).write(
+        LoginsCompanion(lastUsedAt: Value(DateTime.now())),
+      );
+
+  Future<void> deleteLogin(int id) =>
+      (delete(logins)..where((l) => l.id.equals(id))).go();
+
+  Future<void> restoreLogin(Login login) =>
+      into(logins).insert(login, mode: InsertMode.insertOrReplace);
+
+  Stream<List<String>> watchNeverSavePasswords() =>
+      (select(neverSavePasswords)..orderBy([(n) => OrderingTerm.asc(n.origin)]))
+          .watch()
+          .map((rows) => [for (final r in rows) r.origin]);
+
+  Future<bool> isNeverSavePasswords(String origin) async =>
+      await (select(
+        neverSavePasswords,
+      )..where((n) => n.origin.equals(origin))).getSingleOrNull() !=
+      null;
+
+  Future<void> neverSavePasswordsFor(String origin) =>
+      into(neverSavePasswords).insert(
+        NeverSavePasswordsCompanion.insert(origin: origin),
+        mode: InsertMode.insertOrIgnore,
+      );
+
+  Future<void> allowSavingPasswordsFor(String origin) =>
+      (delete(neverSavePasswords)..where((n) => n.origin.equals(origin))).go();
 
   // ---- settings ----
 

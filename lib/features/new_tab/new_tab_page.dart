@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,6 +14,7 @@ import '../tabs/url_input.dart';
 import 'new_tab_tiles.dart';
 
 const _tileWidth = 104.0;
+const _tileSpacing = 8.0;
 
 /// The built-in New Tab page: a search box and a grid of shortcuts and
 /// most visited sites that can be added, edited, removed and dragged.
@@ -244,35 +247,50 @@ class _TileGrid extends ConsumerWidget {
       if (r != null) await actions.edit(i, r.$1, r.$2);
     }
 
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: (_tileWidth + 8) * 8),
-      child: Wrap(
-        alignment: WrapAlignment.center,
-        spacing: 8,
-        runSpacing: 12,
-        children: [
-          for (final (i, t) in tiles.indexed)
-            _DraggableTile(
-              key: ValueKey(t.url),
-              index: i,
-              tile: t,
-              onOpen: () => view.load(t.url),
-              onOpenInBackground: () => ref
-                  .read(tabsProvider.notifier)
-                  .newTab(url: t.url, activate: false),
-              onEdit: () => edit(i),
-              onRemove: () => remove(i),
-              onMove: actions.move,
-            ),
-          if (customCount < maxTiles)
-            _AddTile(
-              onTap: () async {
-                final r = await showShortcutDialog(context);
-                if (r != null) await actions.add(r.$1, r.$2);
-              },
-            ),
-        ],
-      ),
+    return LayoutBuilder(
+      builder: (context, box) {
+        // Two rows at most, like Chrome: as many tiles as fit side by side
+        // (up to eight), the add button taking the last slot.
+        final perRow =
+            ((box.maxWidth + _tileSpacing) / (_tileWidth + _tileSpacing))
+                .floor()
+                .clamp(1, 8);
+        final slots = perRow * 2;
+        final canAdd = customCount < math.min(maxTiles, slots - 1);
+        final shown = tiles.take(canAdd ? slots - 1 : slots);
+        return ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: perRow * (_tileWidth + _tileSpacing),
+          ),
+          child: Wrap(
+            alignment: WrapAlignment.center,
+            spacing: _tileSpacing,
+            runSpacing: 12,
+            children: [
+              for (final (i, t) in shown.indexed)
+                _DraggableTile(
+                  key: ValueKey(t.url),
+                  index: i,
+                  tile: t,
+                  onOpen: () => view.load(t.url),
+                  onOpenInBackground: () => ref
+                      .read(tabsProvider.notifier)
+                      .newTab(url: t.url, activate: false),
+                  onEdit: () => edit(i),
+                  onRemove: () => remove(i),
+                  onMove: actions.move,
+                ),
+              if (canAdd)
+                _AddTile(
+                  onTap: () async {
+                    final r = await showShortcutDialog(context);
+                    if (r != null) await actions.add(r.$1, r.$2);
+                  },
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -319,7 +337,7 @@ class _DraggableTile extends StatelessWidget {
         childWhenDragging: Opacity(opacity: 0.3, child: body),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 120),
-          decoration: BoxDecoration(
+          foregroundDecoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               width: 2,

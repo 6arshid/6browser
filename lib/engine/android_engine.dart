@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -55,6 +57,10 @@ class AndroidBrowserView implements BrowserView {
           },
           onProgress: (_) {},
         ),
+      )
+      ..addJavaScriptChannel(
+        _channel,
+        onMessageReceived: (m) => _scriptMessages.add(m.message),
       );
     // Best-effort private browsing: start from a clean slate.
     if (incognito) {
@@ -68,6 +74,8 @@ class AndroidBrowserView implements BrowserView {
   final bool incognito;
 
   static const _app = MethodChannel('6browser/app');
+  static const _channel = 'sixbrowserPage';
+  final _scriptMessages = StreamController<String>.broadcast();
 
   int get _webViewId =>
       (_controller.platform as AndroidWebViewController).webViewIdentifier;
@@ -205,8 +213,25 @@ class AndroidBrowserView implements BrowserView {
   Future<void> inspectAt(Offset pagePosition) async {}
 
   @override
+  Future<void> runScript(String script) async {
+    try {
+      await _controller.runJavaScript(script);
+    } on PlatformException {
+      // No page loaded yet.
+    }
+  }
+
+  @override
+  String get scriptPostFunction =>
+      'function (m) { $_channel.postMessage(JSON.stringify(m)); }';
+
+  @override
+  Stream<String> get scriptMessages => _scriptMessages.stream;
+
+  @override
   Future<void> dispose() async {
     _disposed = true;
+    _scriptMessages.close();
     await _stopScreenShare();
     if (incognito) {
       await _controller.clearCache();

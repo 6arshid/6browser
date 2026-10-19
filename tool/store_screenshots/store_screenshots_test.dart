@@ -102,6 +102,12 @@ class ShotView implements BrowserView {
   @override
   Future<void> inspectAt(Offset pagePosition) async {}
   @override
+  Future<void> runScript(String script) async {}
+  @override
+  String? get scriptPostFunction => null;
+  @override
+  Stream<String> get scriptMessages => const Stream.empty();
+  @override
   Future<void> dispose() async {}
 }
 

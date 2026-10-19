@@ -28,6 +28,8 @@ class AppSettings {
     this.colorSeed,
     this.chromeTheme = '',
     this.showBookmarksBar = false,
+    this.savePasswords = true,
+    this.fillPasswords = true,
   });
 
   final ThemeMode themeMode;
@@ -42,6 +44,12 @@ class AppSettings {
 
   /// Show the bookmarks bar on every page (otherwise only on New Tab).
   final bool showBookmarksBar;
+
+  /// Offer to save passwords typed into sign-in forms.
+  final bool savePasswords;
+
+  /// Fill saved passwords into sign-in forms when a page opens.
+  final bool fillPasswords;
 
   static const defaults = AppSettings();
 
@@ -63,6 +71,8 @@ class AppSettings {
     },
     chromeTheme: m['chromeTheme'] ?? '',
     showBookmarksBar: m['bookmarksBar'] == 'true',
+    savePasswords: m['passwordsSave'] != 'false',
+    fillPasswords: m['passwordsFill'] != 'false',
   );
 }
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' show AppExitType;
 
 import 'package:file_selector/file_selector.dart';
@@ -12,6 +13,8 @@ import '../features/bookmarks/bookmarks_page.dart';
 import '../features/downloads/downloads_page.dart';
 import '../features/history/history_page.dart';
 import '../features/new_tab/new_tab_page.dart';
+import '../features/passwords/password_prompt.dart';
+import '../features/profiles/profiles.dart';
 import '../features/settings/settings_page.dart';
 import '../features/settings/app_settings.dart';
 import '../features/tabs/tabs_controller.dart';
@@ -47,6 +50,8 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
   final _findFocus = FocusNode();
   BrowserView? _findView;
 
+  StreamSubscription<List<String>>? _handOvers;
+
   @override
   void initState() {
     super.initState();
@@ -54,12 +59,38 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
     Future.microtask(() => ref.read(tabsProvider.notifier).start());
     // The phone bottom bar hides while the address is being edited.
     _addressFocus.addListener(_onAddressFocus);
+    // Launching 6browser again with this profile (e.g. a link clicked in
+    // another app) opens a tab here.
+    _handOvers = ref
+        .read(activeProfileProvider)
+        ?.instance
+        ?.requests
+        .listen(_onHandOver);
+    // With several profiles, the title tells the windows apart.
+    ref.listenManual(profileListProvider, (_, next) {
+      final list = next.value;
+      final active = ref.read(activeProfileProvider);
+      if (list == null || active == null) return;
+      final me = list.byId(active.profile.id) ?? active.profile;
+      WindowCaption.setTitle(
+        list.profiles.length > 1 ? '${me.name} - 6browser' : '6browser',
+      );
+    }, fireImmediately: true);
+  }
+
+  void _onHandOver(List<String> args) {
+    final launch = LaunchOptions.parse(args);
+    ref
+        .read(tabsProvider.notifier)
+        .newTab(url: launch.url, incognito: launch.incognito);
+    WindowCaption.bringToFront();
   }
 
   void _onAddressFocus() => setState(() {});
 
   @override
   void dispose() {
+    _handOvers?.cancel();
     _addressFocus.removeListener(_onAddressFocus);
     _addressFocus.dispose();
     _findText.dispose();
@@ -296,31 +327,37 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
                                       for (final t in state.tabs)
                                         KeyedSubtree(
                                           key: ValueKey(t.id),
-                                          child: Stack(
-                                            fit: StackFit.expand,
-                                            children: [
-                                              ValueListenableBuilder<bool>(
-                                                valueListenable: t.view.isReady,
-                                                builder: (_, ready, _) => ready
-                                                    ? PageContextMenuHost(
-                                                        view: t.view,
-                                                        child: t.view.widget,
-                                                      )
-                                                    : const Center(
-                                                        child:
-                                                            CircularProgressIndicator(),
-                                                      ),
-                                              ),
-                                              // The New Tab page covers the engine's
-                                              // blank page; the view stays alive below.
-                                              ValueListenableBuilder<String>(
-                                                valueListenable: t.view.url,
-                                                builder: (_, url, _) =>
-                                                    isNewTabUrl(url)
-                                                    ? NewTabPage(view: t.view)
-                                                    : const SizedBox.shrink(),
-                                              ),
-                                            ],
+                                          // Saves and fills passwords.
+                                          child: PasswordHost(
+                                            view: t.view,
+                                            child: Stack(
+                                              fit: StackFit.expand,
+                                              children: [
+                                                ValueListenableBuilder<bool>(
+                                                  valueListenable:
+                                                      t.view.isReady,
+                                                  builder: (_, ready, _) =>
+                                                      ready
+                                                      ? PageContextMenuHost(
+                                                          view: t.view,
+                                                          child: t.view.widget,
+                                                        )
+                                                      : const Center(
+                                                          child:
+                                                              CircularProgressIndicator(),
+                                                        ),
+                                                ),
+                                                // The New Tab page covers the engine's
+                                                // blank page; the view stays alive below.
+                                                ValueListenableBuilder<String>(
+                                                  valueListenable: t.view.url,
+                                                  builder: (_, url, _) =>
+                                                      isNewTabUrl(url)
+                                                      ? NewTabPage(view: t.view)
+                                                      : const SizedBox.shrink(),
+                                                ),
+                                              ],
+                                            ),
                                           ),
                                         ),
                                     ],

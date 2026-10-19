@@ -112,14 +112,12 @@ class ImportService {
     });
   }
 
-  /// Inserts [bookmarks] into our Bookmarks table (duplicates ignored by URL).
-  /// Returns the number inserted.
-  Future<int> importBookmarks(List<ImportedBookmark> bookmarks) async {
-    if (bookmarks.isEmpty) return 0;
-    return db.addBookmarks([
-      for (final b in bookmarks) (url: b.url, title: b.title),
-    ]);
-  }
+  /// Adds [bookmarks] with their folders (see [AppDatabase.importBookmarks]).
+  Future<({int added, int moved})> importBookmarks(
+    List<ImportedBookmark> bookmarks,
+  ) => db.importBookmarks([
+    for (final b in bookmarks) (url: b.url, title: b.title, folders: b.folders),
+  ]);
 
   void _guard(List<ImportIssue> issues, String category, void Function() body) {
     try {

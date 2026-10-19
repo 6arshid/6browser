@@ -9,20 +9,22 @@ import '../../engine/browser_engine.dart';
 import '../../engine/cef_engine.dart';
 import '../../data/providers.dart';
 import '../downloads/download_utils.dart';
+import '../profiles/profiles.dart';
 import 'tabs_state.dart';
 import 'url_input.dart';
 
 /// The engine backend, chosen by platform: the WebView backend on Android,
-/// CEF on desktop. Overridden in tests with a fake.
+/// CEF on desktop (with the profile's data folder). Overridden in tests
+/// with a fake.
 final engineProvider = Provider<BrowserEngine>(
   (ref) => defaultTargetPlatform == TargetPlatform.android
       ? AndroidEngine()
-      : CefEngine(),
+      : CefEngine(cachePath: ref.read(activeProfileProvider)?.cachePath),
 );
 
 /// Command-line options the app was started with.
 class LaunchOptions {
-  const LaunchOptions({this.incognito = false, this.url});
+  const LaunchOptions({this.incognito = false, this.url, this.profile});
 
   /// Start with a private first tab (`--incognito`).
   final bool incognito;
@@ -30,9 +32,16 @@ class LaunchOptions {
   /// Optional URL to open as the first tab (first non-flag argument).
   final String? url;
 
+  /// Profile to open (`--profile=<id>`); null for the one used last.
+  final String? profile;
+
   factory LaunchOptions.parse(List<String> args) => LaunchOptions(
     incognito: args.contains('--incognito'),
     url: args.where((a) => !a.startsWith('-')).firstOrNull,
+    profile: args
+        .where((a) => a.startsWith('--profile='))
+        .map((a) => a.substring('--profile='.length))
+        .firstOrNull,
   );
 }
 

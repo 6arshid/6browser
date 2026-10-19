@@ -11,8 +11,15 @@ import 'browser_engine.dart';
 /// (Alloy runtime, off-screen rendering). Chrome extensions are NOT supported
 /// by this backend; see docs/ENGINE.md.
 class CefEngine implements BrowserEngine {
+  CefEngine({this.cachePath});
+
+  /// The profile's folder for cookies, site data and cache; null for the
+  /// plugin's default.
+  final String? cachePath;
+
   @override
-  Future<void> initialize() => WebviewManager().initialize();
+  Future<void> initialize() =>
+      WebviewManager().initialize(cachePath: cachePath);
 
   @override
   Stream<DownloadEvent> get downloads => WebviewManager().downloadEvents.map(
@@ -59,15 +66,24 @@ class CefBrowserView implements BrowserView {
         onZoomChanged: (level) => _zoom.value = pow(1.2, level).toDouble(),
       ),
     );
+    // The plugin's V8 extension defines external.JavaScriptChannel in every
+    // frame; registering the name routes those messages here.
+    _controller.javascriptChannels[_channel] = JavascriptChannel(
+      name: _channel,
+      onMessageReceived: (m) => _scriptMessages.add(m.message),
+    );
     _url.value = initialUrl;
     _controller.initialize(initialUrl, incognito: incognito);
     _controller.addListener(() => _isReady.value = _controller.value);
   }
 
+  static const _channel = 'sixbrowserPage';
+
   @override
   final bool incognito;
 
   late final WebViewController _controller;
+  final _scriptMessages = StreamController<String>.broadcast();
   final _url = ValueNotifier<String>('');
   final _title = ValueNotifier<String>('');
   final _isLoading = ValueNotifier<bool>(false);
@@ -143,8 +159,22 @@ class CefBrowserView implements BrowserView {
       _controller.inspectElementAt(pagePosition);
 
   @override
+  Future<void> runScript(String script) async {
+    // The browser may not have been created yet.
+    if (_controller.value) await _controller.executeJavaScript(script);
+  }
+
+  @override
+  String get scriptPostFunction =>
+      "function (m) { external.JavaScriptChannel('$_channel', m); }";
+
+  @override
+  Stream<String> get scriptMessages => _scriptMessages.stream;
+
+  @override
   Future<void> dispose() {
     _contextMenus.close();
+    _scriptMessages.close();
     return _controller.dispose();
   }
 }

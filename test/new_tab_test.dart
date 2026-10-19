@@ -220,6 +220,25 @@ void main() {
       expect(tester.getCenter(b).dx, lessThan(tester.getCenter(a).dx));
     });
 
+    testWidgets('tiles fill two rows at most', (tester) async {
+      final c = await pumpShell(tester, const Size(1200, 800));
+      final db = c.read(databaseProvider);
+      await tester.runAsync(() async {
+        for (var i = 0; i < 20; i++) {
+          await visit(db, 'https://site$i.com/', 1);
+        }
+      });
+      await tester.pumpAndSettle();
+      // 8 per row at this width: 15 sites and the add button.
+      final shown = find.textContaining('Title of https://site');
+      expect(shown, findsNWidgets(15));
+      expect(find.text('Add shortcut'), findsOneWidget);
+      final rows = {
+        for (var i = 0; i < 15; i++) tester.getTopLeft(shown.at(i)).dy,
+      };
+      expect(rows, hasLength(2));
+    });
+
     testWidgets('incognito New Tab page has no tiles', (tester) async {
       final c = await pumpShell(tester, const Size(1200, 800));
       c.read(tabsProvider.notifier).newIncognitoTab();

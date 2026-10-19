@@ -25,49 +25,55 @@ class FirefoxReader {
     return withSqliteCopy(src.path, (db) => _queryBookmarks(db));
   }
 
+  /// Firefox's root folders by guid, and where their contents go: the
+  /// toolbar is the bookmarks bar, the others become folders on it. Tags
+  /// (folders of bookmark copies) are left out.
+  static const _roots = [
+    ('toolbar_____', <String>[]),
+    ('menu________', ['Bookmarks Menu']),
+    ('unfiled_____', [otherBookmarksFolder]),
+    ('mobile______', ['Mobile Bookmarks']),
+  ];
+
   static List<ImportedBookmark> _queryBookmarks(Database db) {
-    // moz_bookmarks.type 1 = bookmark, 2 = folder. Resolve the folder chain
-    // through parent ids.
-    final folders = <int, _Folder>{};
-    for (final row in db.select(
-      'SELECT id, parent, title, type FROM moz_bookmarks',
-    )) {
-      final id = row['id'] as int;
-      if ((row['type'] as int) == 2) {
-        folders[id] = _Folder(row['parent'] as int, row['title'] as String?);
-      }
+    // moz_bookmarks.type 1 = bookmark, 2 = folder; position orders the
+    // items of a folder.
+    final rows = db.select(
+      'SELECT b.id AS id, b.type AS type, b.parent AS parent, '
+      'b.title AS title, b.guid AS guid, p.url AS url '
+      'FROM moz_bookmarks b LEFT JOIN moz_places p ON b.fk = p.id '
+      'ORDER BY b.parent, b.position, b.id',
+    );
+    final children = <int, List<Row>>{};
+    final roots = <String, int>{};
+    for (final row in rows) {
+      (children[row['parent'] as int] ??= []).add(row);
+      if (row['guid'] case final String guid) roots[guid] = row['id'] as int;
     }
-    String? folderPath(int parent) {
-      final parts = <String>[];
-      var cur = parent;
-      var guard = 0;
-      while (folders.containsKey(cur) && guard++ < 32) {
-        final f = folders[cur]!;
-        final name = f.title;
-        // Skip Firefox root containers that have no user-facing name.
-        if (name != null && name.isNotEmpty) parts.insert(0, name);
-        cur = f.parent;
+    final out = <ImportedBookmark>[];
+    void walk(int folder, List<String> path) {
+      if (path.length > 32) return;
+      for (final row in children[folder] ?? const <Row>[]) {
+        final title = (row['title'] as String?)?.trim() ?? '';
+        switch (row['type']) {
+          case 1:
+            final url = row['url'] as String?;
+            if (url == null || !url.startsWith('http')) continue;
+            out.add(
+              ImportedBookmark(
+                url: url,
+                title: title.isEmpty ? url : title,
+                folders: path,
+              ),
+            );
+          case 2:
+            walk(row['id'] as int, [...path, title.isEmpty ? 'Folder' : title]);
+        }
       }
-      return parts.isEmpty ? null : parts.join('/');
     }
 
-    final out = <ImportedBookmark>[];
-    final rows = db.select(
-      'SELECT b.title AS title, b.parent AS parent, p.url AS url '
-      'FROM moz_bookmarks b JOIN moz_places p ON b.fk = p.id '
-      "WHERE b.type = 1 AND p.url LIKE 'http%'",
-    );
-    for (final row in rows) {
-      final url = row['url'] as String;
-      out.add(
-        ImportedBookmark(
-          url: url,
-          title: (row['title'] as String?)?.trim().isNotEmpty == true
-              ? row['title'] as String
-              : url,
-          folder: folderPath(row['parent'] as int),
-        ),
-      );
+    for (final (guid, path) in _roots) {
+      if (roots[guid] case final id?) walk(id, path);
     }
     return out;
   }
@@ -121,10 +127,4 @@ class FirefoxReader {
       return 0;
     }
   }
-}
-
-class _Folder {
-  const _Folder(this.parent, this.title);
-  final int parent;
-  final String? title;
 }

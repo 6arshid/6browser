@@ -1,11 +1,11 @@
 import 'dart:convert';
-import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:ffi/ffi.dart';
 import 'package:path/path.dart' as p;
 import 'package:pointycastle/export.dart';
+
+import '../passwords/dpapi.dart';
 
 /// Decrypts Chromium "Login Data" password blobs on Windows.
 ///
@@ -35,7 +35,7 @@ class ChromiumDecryptor {
         // Strip the "DPAPI" prefix, then unprotect to get the 32-byte key.
         if (raw.length > 5) {
           raw = raw.sublist(5);
-          key = Uint8List.fromList(_dpapiUnprotect(raw));
+          key = Uint8List.fromList(Dpapi.unprotect(raw));
         }
       }
     }
@@ -67,89 +67,9 @@ class ChromiumDecryptor {
         return utf8.decode(gcm.process(Uint8List.fromList(payload)));
       }
       // Legacy: the blob is DPAPI-encrypted directly.
-      return utf8.decode(_dpapiUnprotect(bytes));
+      return utf8.decode(Dpapi.unprotect(bytes));
     } catch (_) {
       return '';
     }
   }
-}
-
-// ---- Windows DPAPI (CryptUnprotectData) via FFI ----
-
-final class _DataBlob extends Struct {
-  @Uint32()
-  external int cbData;
-  external Pointer<Uint8> pbData;
-}
-
-typedef _CryptUnprotectC = Int32 Function(
-  Pointer<_DataBlob> pDataIn,
-  Pointer<Pointer<Utf16>> ppszDataDescr,
-  Pointer<_DataBlob> pOptionalEntropy,
-  Pointer<Void> pvReserved,
-  Pointer<Void> pPromptStruct,
-  Uint32 dwFlags,
-  Pointer<_DataBlob> pDataOut,
-);
-typedef _CryptUnprotectDart = int Function(
-  Pointer<_DataBlob> pDataIn,
-  Pointer<Pointer<Utf16>> ppszDataDescr,
-  Pointer<_DataBlob> pOptionalEntropy,
-  Pointer<Void> pvReserved,
-  Pointer<Void> pPromptStruct,
-  int dwFlags,
-  Pointer<_DataBlob> pDataOut,
-);
-
-typedef _LocalFreeC = Pointer<Void> Function(Pointer<Void> hMem);
-typedef _LocalFreeDart = Pointer<Void> Function(Pointer<Void> hMem);
-
-final _crypt32 = DynamicLibrary.open('crypt32.dll');
-final _kernel32 = DynamicLibrary.open('kernel32.dll');
-final _cryptUnprotect = _crypt32
-    .lookupFunction<_CryptUnprotectC, _CryptUnprotectDart>(
-      'CryptUnprotectData',
-    );
-final _localFree = _kernel32.lookupFunction<_LocalFreeC, _LocalFreeDart>(
-  'LocalFree',
-);
-
-Uint8List _dpapiUnprotect(List<int> input) {
-  final inPtr = calloc<_DataBlob>();
-  final outPtr = calloc<_DataBlob>();
-  final buffer = calloc<Uint8>(input.length);
-  try {
-    buffer.asTypedList(input.length).setAll(0, input);
-    inPtr.ref
-      ..cbData = input.length
-      ..pbData = buffer;
-
-    final ok = _cryptUnprotect(
-      inPtr,
-      nullptr,
-      nullptr,
-      nullptr,
-      nullptr,
-      0,
-      outPtr,
-    );
-    if (ok == 0) {
-      throw const _DpapiException();
-    }
-    final out = Uint8List.fromList(
-      outPtr.ref.pbData.asTypedList(outPtr.ref.cbData),
-    );
-    _localFree(outPtr.ref.pbData.cast());
-    return out;
-  } finally {
-    calloc.free(buffer);
-    calloc.free(inPtr);
-    calloc.free(outPtr);
-  }
-}
-
-class _DpapiException implements Exception {
-  const _DpapiException();
-  @override
-  String toString() => 'CryptUnprotectData failed';
 }

@@ -31,7 +31,7 @@ class BookmarkFileParser {
   }
 
   static final _token = RegExp(
-    r'<H3[^>]*>(.*?)</H3>'
+    r'<H3([^>]*)>(.*?)</H3>'
     r'|<A\s[^>]*?HREF\s*=\s*"([^"]*)"[^>]*>(.*?)</A>'
     r'|<DL\b'
     r'|</DL>',
@@ -39,41 +39,79 @@ class BookmarkFileParser {
     dotAll: true,
   );
 
+  static bool _flag(String attributes, String name) =>
+      RegExp('$name\\s*=\\s*"true"', caseSensitive: false).hasMatch(attributes);
+
   /// Exposed for tests: parse the Netscape bookmarks HTML format.
+  ///
+  /// The folder marked PERSONAL_TOOLBAR_FOLDER is the bookmarks bar. Chrome,
+  /// Edge and Firefox list the rest of the bookmarks outside it; those go
+  /// into an "Other bookmarks" folder (Firefox's own UNFILED folder becomes
+  /// that folder).
   static List<ImportedBookmark> parseNetscapeHtml(String source) {
-    final out = <ImportedBookmark>[];
+    final found = <({String url, String title, List<String> path, bool bar})>[];
+    var hasBar = false;
     // One entry per open <DL>; null for lists that aren't a named folder.
-    final stack = <String?>[];
-    String? pendingFolder;
+    final stack = <_Folder?>[];
+    _Folder? pending;
     for (final m in _token.allMatches(source)) {
       final text = m.group(0)!;
-      if (m.group(1) != null) {
-        pendingFolder = _clean(m.group(1)!);
-      } else if (m.group(2) != null) {
-        final url = _decode(m.group(2)!.trim());
+      if (m.group(2) != null) {
+        final attributes = m.group(1)!;
+        final bar = _flag(attributes, 'PERSONAL_TOOLBAR_FOLDER');
+        hasBar |= bar;
+        pending = _Folder(
+          _clean(m.group(2)!),
+          bar: bar,
+          other: _flag(attributes, 'UNFILED_BOOKMARKS_FOLDER'),
+        );
+      } else if (m.group(3) != null) {
+        final url = _decode(m.group(3)!.trim());
         // Firefox smart folders ("place:...") and bookmarklets aren't pages.
         if (url.isEmpty ||
             url.startsWith('place:') ||
             url.startsWith('javascript:')) {
           continue;
         }
-        final title = _clean(m.group(3)!);
-        final path = stack.whereType<String>().join('/');
-        out.add(
-          ImportedBookmark(
-            url: url,
-            title: title.isEmpty ? url : title,
-            folder: path.isEmpty ? null : path,
-          ),
-        );
+        final title = _clean(m.group(4)!);
+        final path = <String>[];
+        var bar = false;
+        for (final f in stack.nonNulls) {
+          if (f.bar) {
+            bar = true;
+            path.clear();
+          } else if (f.other) {
+            path
+              ..clear()
+              ..add(otherBookmarksFolder);
+          } else if (f.name.isNotEmpty) {
+            path.add(f.name);
+          }
+        }
+        found.add((
+          url: url,
+          title: title.isEmpty ? url : title,
+          path: path,
+          bar: bar,
+        ));
       } else if (text.startsWith('</')) {
         if (stack.isNotEmpty) stack.removeLast();
       } else {
-        stack.add(pendingFolder);
-        pendingFolder = null;
+        stack.add(pending);
+        pending = null;
       }
     }
-    return out;
+    return [
+      for (final f in found)
+        ImportedBookmark(
+          url: f.url,
+          title: f.title,
+          folders:
+              !hasBar || f.bar || f.path.firstOrNull == otherBookmarksFolder
+              ? f.path
+              : [otherBookmarksFolder, ...f.path],
+        ),
+    ];
   }
 
   static String _clean(String html) =>
@@ -99,4 +137,17 @@ class BookmarkFileParser {
       }[e]!;
     },
   );
+}
+
+/// A folder (`<H3>`) of a bookmarks HTML file.
+class _Folder {
+  const _Folder(this.name, {this.bar = false, this.other = false});
+
+  final String name;
+
+  /// The browser's bookmarks bar (PERSONAL_TOOLBAR_FOLDER).
+  final bool bar;
+
+  /// Firefox's "Other Bookmarks" (UNFILED_BOOKMARKS_FOLDER).
+  final bool other;
 }

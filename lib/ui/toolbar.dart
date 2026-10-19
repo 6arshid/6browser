@@ -4,10 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/providers.dart';
 import '../engine/browser_engine.dart';
+import '../features/bookmarks/bookmark_dialogs.dart';
 import '../features/bookmarks/bookmarks_page.dart';
 import '../features/downloads/downloads_page.dart';
 import '../features/history/history_page.dart';
 import '../features/import/import_page.dart';
+import '../features/passwords/password_prompt.dart';
+import '../features/profiles/profiles_page.dart';
 import '../features/settings/app_settings.dart';
 import '../features/settings/appearance_settings.dart';
 import '../features/settings/settings_page.dart';
@@ -229,6 +232,7 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
                       null => const SizedBox.shrink(),
                     },
                   ),
+                if (!compact) const ProfileButton(),
                 if (!compact) _MainMenu(menuKey: widget.menuKey, view: view),
                 if (compact && !editing && view != null) reload,
               ],
@@ -352,6 +356,10 @@ class _Omnibox extends ConsumerWidget {
                         : Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              PasswordKeyButton(
+                                view: view,
+                                color: colors.omniboxText,
+                              ),
                               _ZoomChip(view: view),
                               _BookmarkStar(view: view),
                             ],
@@ -518,7 +526,8 @@ class _ZoomChip extends StatelessWidget {
   );
 }
 
-/// Star that shows and toggles whether the current page is bookmarked.
+/// Star that shows whether the current page is bookmarked. Clicking it
+/// bookmarks the page and opens the editor (name, folder, remove).
 class _BookmarkStar extends ConsumerWidget {
   const _BookmarkStar({required this.view});
 
@@ -533,16 +542,23 @@ class _BookmarkStar extends ConsumerWidget {
       builder: (_, url, _) {
         if (!isBookmarkable(url)) return const SizedBox.shrink();
         final on = ref.watch(isBookmarkedProvider(url)).value ?? false;
-        return IconButton(
-          tooltip: on ? 'Remove bookmark' : 'Bookmark this tab',
-          iconSize: 18,
-          color: on
-              ? Theme.of(context).colorScheme.primary
-              : colors.omniboxText,
-          icon: Icon(on ? Icons.star : Icons.star_border),
-          onPressed: () => on
-              ? db.removeBookmarkByUrl(url)
-              : db.addBookmark(url, view.title.value),
+        return Builder(
+          builder: (context) => IconButton(
+            tooltip: on ? 'Edit bookmark for this tab' : 'Bookmark this tab',
+            iconSize: 18,
+            color: on
+                ? Theme.of(context).colorScheme.primary
+                : colors.omniboxText,
+            icon: Icon(on ? Icons.star : Icons.star_border),
+            onPressed: () async {
+              final id = on
+                  ? (await db.bookmarkForUrl(url))?.id
+                  : await db.addBookmark(url, view.title.value);
+              if (id != null && context.mounted) {
+                await showBookmarkEditor(context, id: id, added: !on);
+              }
+            },
+          ),
         );
       },
     );

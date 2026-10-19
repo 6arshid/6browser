@@ -45,11 +45,38 @@ void main() {
         'https://root.test',
       ]);
       expect(marks[0].title, 'Tom & Jerry');
-      expect(marks[0].folder, 'Bookmarks bar');
-      expect(marks[1].folder, 'Bookmarks bar/News');
-      expect(marks[2].folder, 'Bookmarks bar');
+      // The toolbar folder is our bookmarks bar; the rest is "Other".
+      expect(marks[0].folders, isEmpty);
+      expect(marks[1].folders, ['News']);
+      expect(marks[2].folders, isEmpty);
       expect(marks[2].title, 'https://after.test');
-      expect(marks[3].folder, isNull);
+      expect(marks[3].folders, ['Other bookmarks']);
+    });
+
+    test("maps Firefox's Other Bookmarks folder without nesting it", () {
+      const html = '''
+<!DOCTYPE NETSCAPE-Bookmark-file-1>
+<DL><p>
+    <DT><A HREF="https://menu.test">Menu item</A>
+    <DT><H3 PERSONAL_TOOLBAR_FOLDER="true">Bookmarks Toolbar</H3>
+    <DL><p>
+        <DT><A HREF="https://bar.test">Bar</A>
+    </DL><p>
+    <DT><H3 UNFILED_BOOKMARKS_FOLDER="true">Other Bookmarks</H3>
+    <DL><p>
+        <DT><H3>Work</H3>
+        <DL><p>
+            <DT><A HREF="https://work.test">Work</A>
+        </DL><p>
+    </DL><p>
+</DL><p>
+''';
+      final marks = BookmarkFileParser.parse(html);
+      expect(marks.map((m) => [m.url, ...m.folders]), [
+        ['https://menu.test', 'Other bookmarks'],
+        ['https://bar.test'],
+        ['https://work.test', 'Other bookmarks', 'Work'],
+      ]);
     });
 
     test('accepts Chromium Bookmarks JSON', () {
@@ -85,15 +112,19 @@ void main() {
             {"type":"url","name":"Site","url":"https://news.test"}
           ]}
         ]},
-       "other":{"type":"folder","name":"Other","children":[]}}}
+       "other":{"type":"folder","name":"Other","children":[
+          {"type":"url","name":"Elsewhere","url":"https://other.test"}
+       ]}}}
       ''';
       final marks = ChromiumReader.parseBookmarksJson(json);
       expect(marks.map((m) => m.url), [
         'https://example.com',
         'https://news.test',
+        'https://other.test',
       ]);
-      expect(marks[0].folder, 'Bookmarks bar');
-      expect(marks[1].folder, 'Bookmarks bar/News');
+      expect(marks[0].folders, isEmpty);
+      expect(marks[1].folders, ['News']);
+      expect(marks[2].folders, ['Other']);
     });
 
     test('rejects non-Chromium JSON', () {
@@ -200,19 +231,32 @@ void main() {
       CREATE TABLE moz_places(id INTEGER PRIMARY KEY, url TEXT);
       CREATE TABLE moz_bookmarks(
         id INTEGER PRIMARY KEY, type INTEGER, parent INTEGER,
-        fk INTEGER, title TEXT);
-      INSERT INTO moz_places(id, url) VALUES (10, 'https://moz.test');
-      INSERT INTO moz_bookmarks(id,type,parent,fk,title)
-        VALUES (1,2,0,NULL,'Toolbar');
-      INSERT INTO moz_bookmarks(id,type,parent,fk,title)
-        VALUES (2,1,1,10,'Mozilla');
+        position INTEGER, fk INTEGER, title TEXT, guid TEXT);
+      INSERT INTO moz_places(id, url) VALUES
+        (10, 'https://moz.test'), (11, 'https://news.test'),
+        (12, 'https://menu.test');
+      INSERT INTO moz_bookmarks(id, type, parent, position, fk, title, guid)
+      VALUES
+        (1, 2, 0, 0, NULL, '', 'root________'),
+        (2, 2, 1, 0, NULL, 'menu', 'menu________'),
+        (3, 2, 1, 1, NULL, 'toolbar', 'toolbar_____'),
+        (4, 2, 1, 2, NULL, 'tags', 'tags________'),
+        (5, 2, 3, 1, NULL, 'News', 'folder000001'),
+        (6, 1, 3, 0, 10, 'Mozilla', 'bookmark0001'),
+        (7, 1, 5, 0, 11, 'News site', 'bookmark0002'),
+        (8, 1, 2, 0, 12, 'Menu item', 'bookmark0003'),
+        (9, 2, 4, 0, NULL, 'some tag', 'tag000000001'),
+        (10, 1, 9, 0, 10, NULL, 'tagentry0001');
     ''');
     db.close();
 
     final marks = FirefoxReader(dir.path).readBookmarks();
-    expect(marks.length, 1);
-    expect(marks.first.url, 'https://moz.test');
-    expect(marks.first.folder, 'Toolbar');
+    // Toolbar first, in Firefox's order; tag entries are not bookmarks.
+    expect(marks.map((m) => [m.url, ...m.folders]), [
+      ['https://moz.test'],
+      ['https://news.test', 'News'],
+      ['https://menu.test', 'Bookmarks Menu'],
+    ]);
   });
 
   test('AppDatabase.addBookmarks de-dupes by URL', () async {
@@ -275,7 +319,8 @@ void main() {
     await tester.ensureVisible(find.text('Import 1'));
     await tester.tap(find.text('Import 1'));
     await tester.pumpAndSettle();
-    expect(await db.watchBookmarks().first, hasLength(1));
+    final saved = await tester.runAsync(() => db.watchBookmarks().first);
+    expect(saved, hasLength(1));
   });
 
   testWidgets('ImportPage offers file import when no profiles are found', (

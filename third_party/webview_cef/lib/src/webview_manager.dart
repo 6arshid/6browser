@@ -62,9 +62,14 @@ class WebviewManager extends ValueNotifier<bool> {
   /// total, state: 0 in progress / 1 complete / 2 canceled).
   Stream<Map<String, dynamic>> get downloadEvents => _downloadEvents.stream;
 
-  Future<void> initialize({String? userAgent}) async {
+  /// [cachePath] (6browser patch) is the folder for cookies, site data and
+  /// cache. Only one process may use a folder at a time.
+  Future<void> initialize({String? userAgent, String? cachePath}) async {
     _creatingCompleter = Completer<void>();
     try {
+      if (cachePath != null && cachePath.isNotEmpty) {
+        await pluginChannel.invokeMethod('setCachePath', cachePath);
+      }
       if (userAgent != null && userAgent.isNotEmpty) {
         await pluginChannel.invokeMethod('init', userAgent);
       } else {

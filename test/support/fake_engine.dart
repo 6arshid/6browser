@@ -77,6 +77,16 @@ class FakeView implements BrowserView {
   Future<void> download(String url) async => downloads.add(url);
   @override
   Future<void> inspectAt(Offset pagePosition) async {}
+  /// Scripts run in the page, and messages the page sends back.
+  final scripts = <String>[];
+  final scriptController = StreamController<String>.broadcast();
+  @override
+  Future<void> runScript(String script) async => scripts.add(script);
+  @override
+  String get scriptPostFunction => 'function (m) { fakePost(m); }';
+  @override
+  Stream<String> get scriptMessages => scriptController.stream;
+
   @override
   Future<void> dispose() async => disposed = true;
 }

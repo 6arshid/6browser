@@ -29,14 +29,28 @@ class ChromiumReader {
       throw const FormatException('Not a Chromium Bookmarks file');
     }
     final out = <ImportedBookmark>[];
-    final roots = data['roots'] as Map;
-    for (final root in roots.values) {
-      if (root is Map) _walk(root, null, out);
+    // The bookmarks bar maps onto ours; the other roots ("Other bookmarks",
+    // "Mobile bookmarks") become folders on it, under their own names.
+    for (final MapEntry(:key, value: root) in (data['roots'] as Map).entries) {
+      if (root is! Map || root['children'] is! List) continue;
+      final name = (root['name'] as String?)?.trim() ?? '';
+      final path = key == 'bookmark_bar'
+          ? const <String>[]
+          : [
+              name.isNotEmpty
+                  ? name
+                  : key == 'synced'
+                  ? 'Mobile bookmarks'
+                  : otherBookmarksFolder,
+            ];
+      for (final c in root['children'] as List) {
+        if (c is Map) _walk(c, path, out);
+      }
     }
     return out;
   }
 
-  static void _walk(Map node, String? folder, List<ImportedBookmark> out) {
+  static void _walk(Map node, List<String> path, List<ImportedBookmark> out) {
     final type = node['type'];
     if (type == 'url') {
       final url = node['url'];
@@ -45,13 +59,13 @@ class ChromiumReader {
           ImportedBookmark(
             url: url,
             title: (node['name'] as String?) ?? url,
-            folder: folder,
+            folders: path,
           ),
         );
       }
     } else if (type == 'folder' && node['children'] is List) {
-      final name = node['name'] as String?;
-      final child = (folder == null || folder.isEmpty) ? name : '$folder/$name';
+      final name = (node['name'] as String?)?.trim() ?? '';
+      final child = [...path, name.isEmpty ? 'Folder' : name];
       for (final c in node['children'] as List) {
         if (c is Map) _walk(c, child, out);
       }

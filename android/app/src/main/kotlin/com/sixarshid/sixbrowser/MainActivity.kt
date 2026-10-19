@@ -6,6 +6,7 @@ import io.flutter.plugin.common.MethodChannel
 import android.Manifest
 import android.app.ActivityManager
 import android.app.AlertDialog
+import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -15,6 +16,7 @@ import io.flutter.plugins.webviewflutter.WebViewFlutterAndroidExternalApi
 
 class MainActivity : FlutterActivity() {
     private var pendingMediaResult: MethodChannel.Result? = null
+    private var pendingVerifyResult: MethodChannel.Result? = null
     private val screenShare = ScreenShareBridge(this)
     private var pendingScreenCapture: ((String?) -> Unit)? = null
     private var screenConsentOpen = false
@@ -53,6 +55,17 @@ class MainActivity : FlutterActivity() {
                         call.argument<Boolean>("microphone") == true,
                         result,
                     )
+                    "sealSecret" -> try {
+                        result.success(SecretKeystore.seal(call.arguments as String))
+                    } catch (error: Exception) {
+                        result.error("SEAL_FAILED", error.message, null)
+                    }
+                    "openSecret" -> try {
+                        result.success(SecretKeystore.open(call.arguments as ByteArray))
+                    } catch (error: Exception) {
+                        result.error("OPEN_FAILED", error.message, null)
+                    }
+                    "verifyUser" -> verifyUser(call.arguments as? String ?: "", result)
                     else -> result.notImplemented()
                 }
             }
@@ -91,9 +104,38 @@ class MainActivity : FlutterActivity() {
         ScreenShareService.onStarted = null
     }
 
+    // Asks for the screen lock (PIN, pattern, fingerprint) before saved
+    // passwords are shown. Devices without a screen lock are not asked.
+    private fun verifyUser(reason: String, result: MethodChannel.Result) {
+        val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+        if (!keyguard.isDeviceSecure) {
+            result.success(true)
+            return
+        }
+        if (pendingVerifyResult != null) {
+            result.success(false)
+            return
+        }
+        @Suppress("DEPRECATION")
+        val intent = keyguard.createConfirmDeviceCredentialIntent("6browser", reason)
+        if (intent == null) {
+            result.success(true)
+            return
+        }
+        pendingVerifyResult = result
+        @Suppress("DEPRECATION")
+        startActivityForResult(intent, VERIFY_REQUEST_CODE)
+    }
+
     @Deprecated("Activity result API used by FlutterActivity")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == VERIFY_REQUEST_CODE) {
+            val result = pendingVerifyResult
+            pendingVerifyResult = null
+            result?.success(resultCode == RESULT_OK)
+            return
+        }
         if (requestCode != SCREEN_REQUEST_CODE) return
         screenConsentOpen = false
         if (pendingScreenCapture == null) return
@@ -176,5 +218,6 @@ class MainActivity : FlutterActivity() {
     private companion object {
         const val MEDIA_REQUEST_CODE = 6001
         const val SCREEN_REQUEST_CODE = 6002
+        const val VERIFY_REQUEST_CODE = 6003
     }
 }

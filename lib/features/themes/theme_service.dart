@@ -19,8 +19,9 @@ const _prodVersion = '149.0.0.0';
 /// Where installed themes are unpacked, one folder per theme.
 /// Tests override this with a temporary folder.
 final themesDirProvider = FutureProvider<Directory>((ref) async {
-  final support = await getApplicationSupportDirectory();
-  return Directory(p.join(support.path, 'themes'));
+  final data =
+      ref.watch(dataDirProvider) ?? await getApplicationSupportDirectory();
+  return Directory(p.join(data.path, 'themes'));
 });
 
 final themeServiceProvider = Provider<ThemeService>((ref) => ThemeService(ref));

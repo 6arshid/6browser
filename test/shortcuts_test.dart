@@ -190,7 +190,7 @@ void main() {
     expect(find.byTooltip('Bookmark this tab'), findsOneWidget);
     await press(tester, LogicalKeyboardKey.keyD, ctrl: true);
     await tester.pump(const Duration(milliseconds: 50));
-    expect(find.byTooltip('Remove bookmark'), findsOneWidget);
+    expect(find.byTooltip('Edit bookmark for this tab'), findsOneWidget);
     expect(find.text('Bookmark added'), findsOneWidget);
 
     await press(tester, LogicalKeyboardKey.keyU, ctrl: true);
