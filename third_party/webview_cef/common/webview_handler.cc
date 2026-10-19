@@ -362,6 +362,15 @@ bool WebviewHandler::OnBeforePopup(CefRefPtr<CefBrowser> browser,
                                   CefBrowserSettings& settings,
                                   CefRefPtr<CefDictionaryValue>& extra_info,
                                   bool* no_javascript_access) {
+    // 6browser patch: Document Picture-in-Picture (e.g. Google Meet's "Open
+    // picture-in-picture") must get its own popup. Cancelling it, as done for
+    // ordinary popups below, crashes the browser process inside libcef. Use
+    // CEF's default handling (a native always-on-top window, as cefclient
+    // does); a null client keeps it out of our off-screen browser bookkeeping.
+    if (target_disposition == CEF_WOD_NEW_PICTURE_IN_PICTURE) {
+        client = nullptr;
+        return false;
+    }
     loadUrl(browser->GetIdentifier(), target_url);
     return true;
 }
