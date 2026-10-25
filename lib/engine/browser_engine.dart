@@ -177,4 +177,20 @@ abstract class BrowserEngine {
   Future<void> initialize();
   BrowserView createView({required String initialUrl, bool incognito = false});
   Future<void> shutdown();
+
+  /// Chrome extensions, or null when this backend cannot run them.
+  ExtensionHost? get extensions;
+}
+
+/// Loads Chrome extensions into a running engine. Extensions are not kept
+/// by the engine between runs: the app loads its installed ones at start.
+abstract class ExtensionHost {
+  /// Loads the unpacked extension in the folder [path]. Returns the id the
+  /// engine gave it (from the manifest's "key", or derived from the path).
+  /// Throws when the extension is rejected, e.g. an invalid manifest.
+  Future<String> load(String path);
+
+  /// Removes extension [id] from the running engine, deleting the data it
+  /// stored.
+  Future<void> unload(String id);
 }

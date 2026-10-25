@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -176,6 +177,9 @@ class WebviewManager extends ValueNotifier<bool> {
         _webViews[browserId]?.listener?.onZoomChanged
             ?.call((call.arguments['level'] as num).toDouble());
         return;
+      case 'devToolsMessage':
+        _onDevToolsMessage(call.arguments as String);
+        return;
       case 'onLoadStart':
         int browserId = call.arguments["browserId"] as int;
         String urlId = call.arguments["urlId"] as String;
@@ -230,9 +234,62 @@ class WebviewManager extends ValueNotifier<bool> {
     return pluginChannel.invokeMethod('visitUrlCookies', [domain, isHttpOnly]);
   }
 
+  int _devToolsId = 0;
+  final _devToolsCalls = <int, Completer<Map<String, dynamic>>>{};
+
+  /// 6browser patch: sends a DevTools protocol command to the browser target
+  /// over the app's private pipe (Windows only) and returns its result.
+  /// Throws [DevToolsException] when the command fails, and
+  /// [MissingPluginException] where the pipe is not available.
+  Future<Map<String, dynamic>> devTools(String method,
+      [Map<String, dynamic> params = const {}]) async {
+    await ready;
+    final id = ++_devToolsId;
+    final call = Completer<Map<String, dynamic>>();
+    _devToolsCalls[id] = call;
+    try {
+      await pluginChannel.invokeMethod('devToolsSend',
+          jsonEncode({'id': id, 'method': method, 'params': params}));
+    } on PlatformException {
+      _devToolsCalls.remove(id);
+      throw DevToolsException('$method could not be sent');
+    } catch (_) {
+      _devToolsCalls.remove(id);
+      rethrow;
+    }
+    return call.future.timeout(const Duration(seconds: 30), onTimeout: () {
+      _devToolsCalls.remove(id);
+      throw DevToolsException('$method timed out');
+    });
+  }
+
+  void _onDevToolsMessage(String text) {
+    final message = jsonDecode(text);
+    if (message is! Map<String, dynamic>) return;
+    final call = _devToolsCalls.remove(message['id']);
+    if (call == null) return; // an event; none are subscribed to
+    final error = message['error'];
+    if (error is Map) {
+      call.completeError(DevToolsException('${error['message']}'));
+    } else {
+      call.complete(
+          Map<String, dynamic>.from(message['result'] as Map? ?? const {}));
+    }
+  }
+
   Future<void> quit() async {
     //only call this method when you want to quit the app
     assert(value);
     return pluginChannel.invokeMethod('quit');
   }
+}
+
+/// 6browser patch: a DevTools protocol command failed.
+class DevToolsException implements Exception {
+  DevToolsException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
 }

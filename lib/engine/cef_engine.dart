@@ -8,8 +8,8 @@ import 'package:webview_cef/webview_cef.dart';
 import 'browser_engine.dart';
 
 /// [BrowserEngine] backed by CEF through the `webview_cef` plugin
-/// (Alloy runtime, off-screen rendering). Chrome extensions are NOT supported
-/// by this backend; see docs/ENGINE.md.
+/// (Alloy style, off-screen rendering). Extensions run, but the chrome.tabs
+/// and chrome.windows APIs cannot see our tabs; see docs/ENGINE.md.
 class CefEngine implements BrowserEngine {
   CefEngine({this.cachePath});
 
@@ -46,6 +46,28 @@ class CefEngine implements BrowserEngine {
 
   @override
   Future<void> shutdown() => WebviewManager().quit();
+
+  @override
+  ExtensionHost? get extensions =>
+      defaultTargetPlatform == TargetPlatform.windows ? _extensions : null;
+
+  static final _extensions = _CefExtensionHost();
+}
+
+/// Loads extensions over the plugin's private DevTools pipe (the browser
+/// target's Extensions domain).
+class _CefExtensionHost implements ExtensionHost {
+  @override
+  Future<String> load(String path) async {
+    final result = await WebviewManager().devTools('Extensions.loadUnpacked', {
+      'path': path,
+    });
+    return result['id'] as String;
+  }
+
+  @override
+  Future<void> unload(String id) =>
+      WebviewManager().devTools('Extensions.uninstall', {'id': id});
 }
 
 class CefBrowserView implements BrowserView {

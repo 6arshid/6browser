@@ -10,10 +10,11 @@ import '../../data/providers.dart';
 import '../settings/app_settings.dart';
 import 'chrome_theme.dart';
 
-/// Themes larger than this are refused (real themes are a few MB).
-const _maxThemeBytes = 64 * 1024 * 1024;
+/// Themes and extensions larger than this are refused (real ones are a few
+/// MB).
+const maxWebStoreBytes = 64 * 1024 * 1024;
 
-/// Chrome version reported to the Web Store when downloading a theme.
+/// Chrome version reported to the Web Store when downloading.
 const _prodVersion = '149.0.0.0';
 
 /// Where installed themes are unpacked, one folder per theme.
@@ -53,6 +54,33 @@ String? webStoreItemId(String url) {
       .firstOrNull;
 }
 
+/// Downloads Web Store item [id] (a theme or an extension) as `.crx` bytes.
+Future<Uint8List> downloadFromWebStore(String id) async {
+  final url = Uri.https('clients2.google.com', '/service/update2/crx', {
+    'response': 'redirect',
+    'prodversion': _prodVersion,
+    'acceptformat': 'crx2,crx3',
+    'x': 'id=$id&installsource=ondemand&uc',
+  });
+  final client = HttpClient();
+  try {
+    final res = await (await client.getUrl(url)).close();
+    if (res.statusCode != 200) {
+      throw HttpException('Download failed (HTTP ${res.statusCode})');
+    }
+    final builder = BytesBuilder(copy: false);
+    await for (final chunk in res) {
+      builder.add(chunk);
+      if (builder.length > maxWebStoreBytes) {
+        throw const FormatException('The download is too large');
+      }
+    }
+    return builder.takeBytes();
+  } finally {
+    client.close(force: true);
+  }
+}
+
 /// The ZIP payload of a CRX2/CRX3 package. Plain ZIP data is returned as is.
 Uint8List crxToZip(Uint8List bytes) {
   if (bytes.length >= 2 && bytes[0] == 0x50 && bytes[1] == 0x4B) return bytes;
@@ -88,31 +116,8 @@ class ThemeService {
   Future<Directory> get _root => _ref.read(themesDirProvider.future);
 
   /// Downloads a theme from the Chrome Web Store and applies it.
-  Future<ChromeTheme> installFromWebStore(String id) async {
-    final url = Uri.https('clients2.google.com', '/service/update2/crx', {
-      'response': 'redirect',
-      'prodversion': _prodVersion,
-      'acceptformat': 'crx2,crx3',
-      'x': 'id=$id&installsource=ondemand&uc',
-    });
-    final client = HttpClient();
-    try {
-      final res = await (await client.getUrl(url)).close();
-      if (res.statusCode != 200) {
-        throw HttpException('Download failed (HTTP ${res.statusCode})');
-      }
-      final builder = BytesBuilder(copy: false);
-      await for (final chunk in res) {
-        builder.add(chunk);
-        if (builder.length > _maxThemeBytes) {
-          throw const FormatException('The download is too large');
-        }
-      }
-      return await installBytes(builder.takeBytes(), id: id);
-    } finally {
-      client.close(force: true);
-    }
-  }
+  Future<ChromeTheme> installFromWebStore(String id) async =>
+      installBytes(await downloadFromWebStore(id), id: id);
 
   /// Installs a `.crx` or `.zip` file, or an unpacked theme folder.
   Future<ChromeTheme> installFromPath(String path) async {
@@ -126,7 +131,7 @@ class ThemeService {
       return _install(archive, _idFor(path));
     }
     final file = File(path);
-    if (await file.length() > _maxThemeBytes) {
+    if (await file.length() > maxWebStoreBytes) {
       throw const FormatException('The file is too large');
     }
     return installBytes(await file.readAsBytes(), id: _idFor(path));
@@ -151,7 +156,7 @@ class ThemeService {
         final content = entry.readBytes();
         if (content == null) continue;
         total += content.length;
-        if (total > _maxThemeBytes) {
+        if (total > maxWebStoreBytes) {
           throw const FormatException('The theme is too large');
         }
         await File(out).create(recursive: true);

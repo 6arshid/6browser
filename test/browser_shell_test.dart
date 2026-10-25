@@ -171,11 +171,9 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('Web Store pages show the extensions-unsupported notice', (
-    tester,
-  ) async {
+  testWidgets('Web Store pages offer "Add to 6browser"', (tester) async {
     final c = await pumpShell(tester, const Size(1200, 800));
-    expect(find.byIcon(Icons.extension_off), findsNothing);
+    expect(find.text('Add to 6browser'), findsNothing);
     c
         .read(tabsProvider)
         .active!
@@ -184,8 +182,8 @@ void main() {
           'https://chromewebstore.google.com/detail/dark-reader/eimadpbcbfnmbkopoojfekhnkhdbieeh',
         );
     await tester.pump();
-    expect(find.byIcon(Icons.extension_off), findsOneWidget);
-    expect(find.text('Install theme'), findsOneWidget);
+    expect(find.text('Add to 6browser'), findsOneWidget);
+    expect(find.textContaining('"Add to Chrome" button'), findsOneWidget);
     // The old URL's bookmark stream was cancelled; flush drift's timer.
     await tester.pump(const Duration(milliseconds: 10));
   });

@@ -43,6 +43,9 @@ public:
     // CefRefPtr<CefClient> GetDefaultClient() override;
     void OnBeforeChildProcessLaunch(CefRefPtr<CefCommandLine> command_line) override;
     void SetUnSafelyTreatInsecureOriginAsSecure(const CefString& strFilterDomain);
+    // 6browser patch: "<read handle>,<write handle>" of the private DevTools
+    // pipe (Windows), passed to Chromium as --remote-debugging-io-pipes.
+    void SetDevToolsPipes(const std::string& pipes) { m_devToolsPipes = pipes; }
 
     // CefRenderProcessHandler methods.
     void OnWebKitInitialized() override;
@@ -77,7 +80,8 @@ public:
 private:
     uint32_t                        m_uMode = 1;                        //process mode
     bool                            m_bEnableGPU = false;               //enable gpu
-    CefString                       m_strFilterDomain;                  //insecure domain whitelist       
+    CefString                       m_strFilterDomain;                  //insecure domain whitelist
+    std::string                     m_devToolsPipes;                    //6browser: private DevTools pipe handles
 
     CefRefPtr<WebviewHandler>       m_handler;                          //webview handler for main process
     std::shared_ptr<CefJSBridge>	m_render_js_bridge;                 //js bridge for render process

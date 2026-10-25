@@ -77,6 +77,7 @@ class FakeView implements BrowserView {
   Future<void> download(String url) async => downloads.add(url);
   @override
   Future<void> inspectAt(Offset pagePosition) async {}
+
   /// Scripts run in the page, and messages the page sends back.
   final scripts = <String>[];
   final scriptController = StreamController<String>.broadcast();
@@ -106,4 +107,26 @@ class FakeEngine implements BrowserEngine {
   }) => FakeView(initialUrl, incognito: incognito);
   @override
   Future<void> shutdown() async {}
+
+  /// Null: the engine cannot run extensions.
+  @override
+  ExtensionHost? extensions;
+}
+
+/// Records what was loaded; ids are the folder names.
+class FakeExtensionHost implements ExtensionHost {
+  final loaded = <String, String>{};
+
+  @override
+  Future<String> load(String path) async {
+    final id = path
+        .replaceAll(r'\', '/')
+        .split('/')
+        .lastWhere((s) => s.isNotEmpty);
+    loaded[id] = path;
+    return id;
+  }
+
+  @override
+  Future<void> unload(String id) async => loaded.remove(id);
 }

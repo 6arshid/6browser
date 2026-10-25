@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <vector>
 #include <filesystem>
+#include <mutex>
 #ifdef _WIN32
 #include <shlobj.h>
 #endif
@@ -23,6 +24,31 @@ namespace webview_cef {
 	// Dart before "init". Empty: the default folder below.
 	std::string cachePath;
 	bool isCefInitialized = false;
+	// 6browser patch: our ends of the private DevTools pipe (see startCEF) and
+	// where replies go. Replies are read on their own thread.
+	std::mutex devToolsMutex;
+	std::function<void(const std::string&)> devToolsSink;
+#ifdef _WIN32
+	HANDLE devToolsWrite = nullptr;
+
+	void readDevToolsReplies(HANDLE pipe) {
+		std::string pending;
+		char buffer[16384];
+		DWORD read = 0;
+		while (ReadFile(pipe, buffer, sizeof(buffer), &read, nullptr) && read > 0) {
+			pending.append(buffer, read);
+			size_t end;
+			// Chromium ends every message with a NUL byte.
+			while ((end = pending.find('\0')) != std::string::npos) {
+				std::string message = pending.substr(0, end);
+				pending.erase(0, end + 1);
+				std::lock_guard<std::mutex> lock(devToolsMutex);
+				if (devToolsSink) devToolsSink(message);
+			}
+		}
+		CloseHandle(pipe);
+	}
+#endif
 #ifdef OS_MAC
 	std::string g_macSubprocessPath;
 	std::string g_macFrameworkDirPath;
@@ -350,6 +376,17 @@ namespace webview_cef {
                 }
             };
 
+			{
+				std::lock_guard<std::mutex> lock(devToolsMutex);
+				devToolsSink = [=, this](const std::string& message) {
+					if (m_invokeFunc) {
+						WValue* text = webview_value_new_string_len(message.data(), message.size());
+						m_invokeFunc("devToolsMessage", text);
+						webview_value_unref(text);
+					}
+				};
+			}
+
 			m_init = true;
 		}
 	}
@@ -369,6 +406,10 @@ namespace webview_cef {
 		m_handler->onContextMenuEvent = nullptr;
 		m_handler->onFindResultEvent = nullptr;
 		m_handler->onZoomChangedEvent = nullptr;
+		{
+			std::lock_guard<std::mutex> lock(devToolsMutex);
+			devToolsSink = nullptr;
+		}
 		m_init = false;
 	}
 
@@ -390,6 +431,25 @@ namespace webview_cef {
 				cachePath = webview_value_get_string(values);
 			}
 			result(1, nullptr);
+		}
+		else if (name.compare("devToolsSend") == 0) {
+			// 6browser patch: one DevTools protocol message (JSON) for the
+			// browser target. The reply arrives as "devToolsMessage".
+#ifdef _WIN32
+			const char* message = values != nullptr ? webview_value_get_string(values) : nullptr;
+			if (devToolsWrite == nullptr || message == nullptr) {
+				result(-1, nullptr);
+				return;
+			}
+			std::string data(message);
+			data.push_back('\0');
+			DWORD written = 0;
+			const bool ok = WriteFile(devToolsWrite, data.data(), DWORD(data.size()), &written, nullptr) &&
+				written == data.size();
+			result(ok ? 1 : -1, nullptr);
+#else
+			result(0, nullptr);
+#endif
 		}
 		else if (name.compare("quit") == 0) {
 			//only call this method when you want to quit the app
@@ -918,6 +978,25 @@ namespace webview_cef {
 #else
 		//cef message run in another thread on windows/linux
 		cefs.multi_threaded_message_loop = true;
+#endif
+#ifdef _WIN32
+		// 6browser patch: private DevTools pipe to the browser target (loading
+		// and removing extensions). Chromium adopts its two ends through
+		// --remote-debugging-io-pipes (WebviewApp); the handles are not
+		// inheritable, so only this process can use the pipe.
+		HANDLE chromeRead = nullptr, ourWrite = nullptr, ourRead = nullptr, chromeWrite = nullptr;
+		if (CreatePipe(&chromeRead, &ourWrite, nullptr, 1 << 16)) {
+			if (CreatePipe(&ourRead, &chromeWrite, nullptr, 1 << 16)) {
+				devToolsWrite = ourWrite;
+				app->SetDevToolsPipes(
+					std::to_string(reinterpret_cast<uintptr_t>(chromeRead)) + "," +
+					std::to_string(reinterpret_cast<uintptr_t>(chromeWrite)));
+				std::thread(readDevToolsReplies, ourRead).detach();
+			} else {
+				CloseHandle(chromeRead);
+				CloseHandle(ourWrite);
+			}
+		}
 #endif
 		CefInitialize(mainArgs, cefs, app.get(), nullptr);
 	}

@@ -9,6 +9,7 @@ import '../../engine/browser_engine.dart';
 import '../../engine/cef_engine.dart';
 import '../../data/providers.dart';
 import '../downloads/download_utils.dart';
+import '../extensions/extension_service.dart';
 import '../profiles/profiles.dart';
 import 'tabs_state.dart';
 import 'url_input.dart';
@@ -81,6 +82,12 @@ class TabsController extends Notifier<TabsState> {
   /// Starts the engine and opens the first tab.
   Future<void> start() async {
     await _engine.initialize();
+    // Installed extensions first, so they also apply to the first page. A
+    // slow load must not keep the window empty.
+    await ref
+        .read(extensionsProvider.notifier)
+        .loadInstalled()
+        .timeout(const Duration(seconds: 10), onTimeout: () {});
     _recordDownloads();
     final launch = ref.read(launchOptionsProvider);
     newTab(url: launch.url, incognito: launch.incognito);

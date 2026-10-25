@@ -240,8 +240,25 @@ void WebviewApp::OnBeforeCommandLineProcessing(const CefString &process_type, Ce
         {
             values += values.empty() ? "CalculateNativeWinOcclusion" : ",CalculateNativeWinOcclusion";
         }
+        // 6browser patch: extensions run in this engine, so extensions that
+        // other programs register for Chrome (Windows registry, e.g. antivirus
+        // add-ons) must not be picked up. 6browser loads only its own.
+        if (values.find("ExternalExtensions") == size_t(-1))
+        {
+            values += ",ExternalExtensions";
+        }
 
         command_line->AppendSwitchWithValue("disable-features", values);
+
+        // 6browser patch: a DevTools connection to the browser target, used to
+        // load and remove extensions at runtime. It is an anonymous pipe owned
+        // by this process (see startCEF), never a network port, so no other
+        // program can connect to it.
+        if (!m_devToolsPipes.empty())
+        {
+            command_line->AppendSwitch("remote-debugging-pipe");
+            command_line->AppendSwitchWithValue("remote-debugging-io-pipes", m_devToolsPipes);
+        }
         // 6browser patch: upstream's "ignore-certificate-errors" for a filter
         // domain is removed; TLS errors must never be silently ignored.
     }

@@ -64,8 +64,8 @@ Future<void> runThemeInstall(
         SnackBar(
           content: Text(
             e.message == 'This item is not a Chrome theme'
-                ? 'This item is an extension, not a theme. 6browser can '
-                      'install Chrome themes, but not extensions yet.'
+                ? 'This item is an extension, not a theme. Add it from '
+                      'Extensions in the menu.'
                 : 'Could not install the theme: ${e.message}',
           ),
         ),

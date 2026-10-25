@@ -7,6 +7,9 @@ import '../engine/browser_engine.dart';
 import '../features/bookmarks/bookmark_dialogs.dart';
 import '../features/bookmarks/bookmarks_page.dart';
 import '../features/downloads/downloads_page.dart';
+import '../features/extensions/extension_install.dart';
+import '../features/extensions/extension_toolbar.dart';
+import '../features/extensions/extensions_page.dart';
 import '../features/history/history_page.dart';
 import '../features/import/import_page.dart';
 import '../features/passwords/password_prompt.dart';
@@ -220,18 +223,15 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
                       final id? => Padding(
                         padding: const EdgeInsets.only(right: 4),
                         child: FilledButton.icon(
-                          icon: const Icon(Icons.palette_outlined, size: 18),
-                          label: Text(compact ? 'Install' : 'Install theme'),
-                          onPressed: () => runThemeInstall(
-                            context,
-                            ref,
-                            (s) => s.installFromWebStore(id),
-                          ),
+                          icon: const Icon(Icons.add, size: 18),
+                          label: Text(compact ? 'Add' : 'Add to 6browser'),
+                          onPressed: () => runWebStoreInstall(context, ref, id),
                         ),
                       ),
                       null => const SizedBox.shrink(),
                     },
                   ),
+                if (!compact) const ExtensionsToolbar(),
                 if (!compact) const ProfileButton(),
                 if (!compact) _MainMenu(menuKey: widget.menuKey, view: view),
                 if (compact && !editing && view != null) reload,
@@ -633,6 +633,8 @@ class _MainMenu extends ConsumerWidget {
             showCustomizePanel(context);
           case 'settings':
             openPage(context, const SettingsPage());
+          case 'extensions':
+            openPage(context, const ExtensionsPage());
           case 'import':
             openPage(context, const ImportPage());
           case 'shortcuts':
@@ -703,6 +705,7 @@ class _MainMenu extends ConsumerWidget {
           ),
           const PopupMenuDivider(),
         ],
+        item('extensions', Icons.extension_outlined, 'Extensions'),
         item('customize', Icons.palette_outlined, 'Customize appearance'),
         item('import', Icons.move_to_inbox_outlined, 'Import from browser…'),
         item('settings', Icons.settings_outlined, 'Settings'),

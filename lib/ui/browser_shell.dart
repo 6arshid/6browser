@@ -392,9 +392,9 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
   }
 }
 
-/// Shown on the Chrome Web Store: themes can be installed from a theme's
-/// page; extensions cannot be installed by the current engine, so "Add to
-/// Chrome" deliberately does nothing (see docs/ENGINE.md).
+/// Shown on the Chrome Web Store. The store's own "Add to Chrome" button
+/// cannot work here (its install API crashes this engine and is removed,
+/// see docs/ENGINE.md), so it points to "Add to 6browser" instead.
 class _WebStoreBar extends ConsumerWidget {
   const _WebStoreBar({required this.url});
 
@@ -404,6 +404,7 @@ class _WebStoreBar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     final id = webStoreItemId(url);
+    final extensions = ref.read(engineProvider).extensions != null;
     return Material(
       color: scheme.secondaryContainer,
       child: Padding(
@@ -411,21 +412,25 @@ class _WebStoreBar extends ConsumerWidget {
         child: Row(
           children: [
             Icon(
-              id == null ? Icons.palette_outlined : Icons.extension_off,
+              Icons.extension_outlined,
               size: 20,
               color: scheme.onSecondaryContainer,
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: Text(
-                id == null
-                    ? 'Chrome themes from this store work in 6browser: open a '
-                          'theme to install it. Extensions are not supported yet.'
-                    : '"Add to Chrome" does not work in 6browser. For a theme, '
-                          'use "Install theme" next to the address bar. '
-                          'Extensions are not supported yet.',
-                style: TextStyle(color: scheme.onSecondaryContainer),
-              ),
+              child: Text(switch ((id, extensions)) {
+                (null, true) =>
+                  'Extensions and themes from this store work in '
+                      '6browser: open one and use "Add to 6browser" next '
+                      'to the address bar.',
+                (null, false) =>
+                  'Themes from this store work in 6browser: open one and '
+                      'use "Add" next to the address bar. Extensions are '
+                      'not supported on this system yet.',
+                (_, _) =>
+                  'Use "Add to 6browser" next to the address bar; the '
+                      "store's \"Add to Chrome\" button does not work here.",
+              }, style: TextStyle(color: scheme.onSecondaryContainer)),
             ),
           ],
         ),

@@ -33,6 +33,9 @@ class AndroidEngine implements BrowserEngine {
 
   @override
   Future<void> shutdown() async {}
+
+  @override
+  ExtensionHost? get extensions => null;
 }
 
 class AndroidBrowserView implements BrowserView {

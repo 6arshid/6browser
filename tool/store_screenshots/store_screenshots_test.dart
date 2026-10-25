@@ -121,6 +121,8 @@ class ShotEngine implements BrowserEngine {
       ShotView(initialUrl, incognito: incognito);
   @override
   Future<void> shutdown() async {}
+  @override
+  ExtensionHost? get extensions => null;
 }
 
 Future<void> loadFonts() async {

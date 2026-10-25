@@ -59,7 +59,8 @@ with a realistic chance of full extension support.
 Question: can `webview_cef` (option A) run Chrome extensions?
 
 **Answer: no, not with this architecture.** Based on CEF documentation and
-issue tracker (not yet confirmed by a running experiment):
+issue tracker (not yet confirmed by a running experiment). **Superseded by
+spike #4 below: an experiment showed extensions do run in OSR browsers.**
 
 - `webview_cef` creates browsers with `SetAsWindowless` (off-screen
   rendering). CEF docs state windowless browsers always use the **Alloy**
@@ -190,7 +191,7 @@ Fix (`6browser patch` in `common/webview_handler.cc`, `OnLoadEnd`): after a Web
 Store page loads, delete `chrome.webstorePrivate` from the page. Doing it in the
 renderer's `OnContextCreated` did not work, because Chrome's bindings add the
 property after that point. The store then cannot start an install. The Flutter UI
-shows a notice on Web Store pages that extensions cannot be installed yet.
+shows a notice on Web Store pages that points to "Add to 6browser" (spike #4).
 
 Verified: two runs, click "Add to Chrome" via CDP, app alive, no crash events.
 Residual risk: a click during the page load, before `OnLoadEnd`, could still
@@ -261,3 +262,66 @@ extended (`stopLoad`, `reloadIgnoreCache`, `zoom` with the resulting level
 reported per site, `find`/`stopFinding` with `CefFindHandler` results, and
 `print`) for find in page, zoom, hard reload, stop and print. Not available on
 the Android WebView backend (`supportsPageTools` is false).
+
+## Extension spike #4: extensions in OSR, and installing them (2026-10-25)
+
+Experiment, not documentation: CEF 149's `cefclient` with
+`--off-screen-rendering-enabled` (windowless, so Alloy style, the same kind of
+browser `webview_cef` creates), uBlock Origin Lite and Dark Reader, checked over
+the DevTools protocol without desktop input.
+
+| Check | Result in OSR / Alloy style |
+|---|---|
+| MV3 service workers | Run |
+| uBOL `declarativeNetRequest` blocking | Works (ad request blocked, normal request loaded) |
+| Dark Reader content scripts | Work (page turned dark) |
+| Extension pages (`chrome-extension://<id>/popup.html`) in an OSR browser | Load, with `chrome.runtime` / `chrome.storage` |
+| `chrome.tabs.query` / `chrome.windows.getAll` | **Empty**: OSR browsers are not Chrome tabs |
+| `chrome.tabs.create` | **Does nothing** (returns `{}`) |
+| DevTools `Extensions.loadUnpacked` / `uninstall` / `getExtensions` | Work, but **only on the browser target**; page sessions get "Method not available" and `Target.attachToBrowserTarget` is "Not allowed" |
+| Extensions loaded that way after a restart | **Not kept**: the app must load them again at every start |
+
+So the earlier conclusion was wrong for everything except tabs: the extension
+engine works in option A; only Web Store install and the `chrome.tabs` /
+`chrome.windows` APIs are missing.
+
+Implementation (no engine change):
+
+- **Private DevTools pipe** (`common/webview_plugin.cc`, `webview_app.cc`):
+  before `CefInitialize`, two anonymous pipes are created in the app process and
+  their Chromium ends are passed with `--remote-debugging-pipe
+  --remote-debugging-io-pipes=<read>,<write>` (Windows; Chromium adopts the
+  handles with `_open_osfhandle`). No network port, handles are not
+  inheritable, so no other program can reach it. Dart sends browser-target
+  commands with `WebviewManager().devTools(method, params)` (plugin method
+  `devToolsSend`, replies come back as `devToolsMessage`). If the pipe
+  disconnected, Chromium would close the browser; our end stays open for the
+  life of the process. Windows only for now (macOS/Linux would need fds 3/4).
+- `ExternalExtensions` is disabled, so extensions other programs register for
+  Chrome in the Windows registry are not loaded.
+- **Install** (`lib/features/extensions`): "Add to 6browser" next to the
+  address bar on a Web Store item downloads the `.crx` (same update URL as
+  themes); a theme goes to the theme installer, an extension gets Chrome's
+  "Add …? It can: …" dialog, is unpacked to `<profile>/extensions/<id>/` with
+  the developer's public key from the CRX3 header written to the manifest's
+  `"key"`, and is loaded with `Extensions.loadUnpacked`. With the key, the
+  engine gives it its **Web Store id** (verified with uBOL and Dark Reader),
+  so its storage survives reinstalls and sites that talk to it by id work.
+  `extensions.json` lists them; `TabsController.start` loads the enabled ones
+  before the first tab. Also: `.crx`/`.zip` files and "Load unpacked".
+- **Turning off** takes effect at the next start: `Extensions.uninstall` is the
+  only way to unload, and it deletes the extension's data. Remove uses it.
+- **Toolbar**: pinned extension icons and a puzzle menu. Popups are the
+  extension's `default_popup` page in a small OSR browser in a Flutter
+  overlay; it is sized from the page's scroll size (25x25 to 800x600) and
+  `window.close()` closes it. Popups that ask `chrome.tabs` for the current
+  tab show less (uBOL's popup is nearly empty); `action.onClicked` cannot be
+  sent. Options pages open in a tab.
+- **No auto-update**: unpacked extensions are not updated by the engine; adding
+  the item again from the store updates it in place (same folder, data kept).
+
+Still open: `chrome.tabs`/`chrome.windows` for our tabs would need a CEF source
+patch (Chromium's `ExtensionTabUtil` only knows Chrome `Browser` windows);
+"Add to Chrome" on the store itself (its `webstorePrivate` path crashes this
+engine and stays removed); badges; macOS/Linux pipe.
+
