@@ -7,8 +7,13 @@ final _hostLike = RegExp(
 );
 
 /// Turns whatever the user typed in the address bar into a loadable URL:
-/// full URLs pass through, host-like text gets `https://`, anything else
+/// full URLs pass through, host-like text gets `http://`, anything else
 /// becomes a search query.
+///
+/// Like Chrome's address bar, the engine then tries HTTPS first and falls
+/// back to HTTP only when the site has no working HTTPS (Chromium's HTTPS
+/// Upgrades on desktop, [httpsUpgradeOf] on Android). Sending `https://`
+/// here instead made HTTP-only sites and local servers fail to load.
 String resolveInput(
   String input, {
   String searchTemplate = defaultSearchTemplate,
@@ -16,8 +21,37 @@ String resolveInput(
   final text = input.trim();
   if (text.isEmpty) return 'about:blank';
   if (_scheme.hasMatch(text) || text.startsWith('about:')) return text;
-  if (!text.contains(' ') && _hostLike.hasMatch(text)) return 'https://$text';
+  if (!text.contains(' ') && _hostLike.hasMatch(text)) return 'http://$text';
   return searchTemplate.replaceAll('%s', Uri.encodeQueryComponent(text));
+}
+
+final _ipv4 = RegExp(r'^\d{1,3}(\.\d{1,3}){3}$');
+const _localSuffixes = [
+  '.localhost',
+  '.local',
+  '.test',
+  '.internal',
+  '.lan',
+  '.home.arpa',
+];
+
+/// The `https://` form of an `http://` [url] worth trying first, or null
+/// when it should load as is. Mirrors Chromium's HTTPS Upgrades: local and
+/// intranet hosts, IP addresses and non-default ports are left alone.
+String? httpsUpgradeOf(String url) {
+  final uri = Uri.tryParse(url);
+  if (uri == null || uri.scheme != 'http' || uri.hasPort && uri.port != 80) {
+    return null;
+  }
+  final host = uri.host.toLowerCase();
+  if (host.isEmpty ||
+      !host.contains('.') ||
+      host.contains(':') ||
+      _ipv4.hasMatch(host) ||
+      _localSuffixes.any(host.endsWith)) {
+    return null;
+  }
+  return uri.replace(scheme: 'https', port: 443).toString();
 }
 
 /// True when [url] is served over HTTPS (drives the lock indicator).

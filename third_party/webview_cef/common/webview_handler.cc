@@ -41,13 +41,6 @@ namespace {
 // The only browser that currently get focused
 CefRefPtr<CefBrowser> current_focused_browser_ = nullptr;
 
-// Returns a data: URI with the specified contents.
-std::string GetDataURI(const std::string& data, const std::string& mime_type) {
-    return "data:" + mime_type + ";base64," +
-    CefURIEncode(CefBase64Encode(data.data(), data.size()), false)
-        .ToString();
-}
-
 }  // namespace
 
 WebviewHandler::WebviewHandler() {
@@ -125,18 +118,19 @@ bool WebviewHandler::OnRequestMediaAccessPermission(
                                  CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE;
     if ((requested_permissions & CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE) &&
         !(requested_permissions & ~display)) {
-        std::wstring message = requesting_origin.ToWString() +
+        const std::wstring message = requesting_origin.ToWString() +
             L"\n\nShare your ENTIRE desktop with this site?"
-            L"\nEverything visible on your screens may be shared, including other apps and notifications.";
-        if (requested_permissions & CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE) {
-            message += L"\nSystem audio will also be shared.";
-        }
-        message += L"\n\nUse the site's Stop presenting / Stop sharing control to stop."
-                   L"\nThis permission applies to this request only.";
+            L"\nEverything visible on your screens may be shared, including other apps and notifications."
+            L"\n\nUse the site's Stop presenting / Stop sharing control to stop."
+            L"\nThis permission applies to this request only.";
         const bool allowed = MessageBoxW(browser->GetHost()->GetWindowHandle(),
             message.c_str(), L"6browser - Share entire screen",
             MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2 | MB_SETFOREGROUND) == IDYES;
-        callback->Continue(allowed ? requested_permissions : 0);
+        // System audio is never granted: CEF captures it with a plain
+        // "loopback" device that includes this browser's own playback, so the
+        // other people in a call (e.g. Google Meet) hear themselves echoed.
+        // getDisplayMedia treats audio as optional, so video alone is valid.
+        callback->Continue(allowed ? CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE : 0);
         return true;
     }
     // Alloy's default is to deny silently. Ask for each request rather than
@@ -369,6 +363,31 @@ bool WebviewHandler::OnBeforePopup(CefRefPtr<CefBrowser> browser,
     // does); a null client keeps it out of our off-screen browser bookkeeping.
     if (target_disposition == CEF_WOD_NEW_PICTURE_IN_PICTURE) {
         client = nullptr;
+#if defined(OS_WIN)
+        // Off-screen browsers have no native video PiP, so this window also
+        // hosts <video> PiP (see the shim in webview_app.cc). Make it behave
+        // like Chrome's: always on top, in the bottom-right corner of the
+        // monitor that shows the app. Sizes from the page are in DIP.
+        HWND app = browser->GetHost()->GetWindowHandle();
+        MONITORINFO monitor = {sizeof(monitor)};
+        if (GetMonitorInfoW(MonitorFromWindow(app, MONITOR_DEFAULTTONEAREST), &monitor)) {
+            const UINT dpi = (app && GetDpiForWindow(app)) ? GetDpiForWindow(app) : 96;
+            const double scale = dpi / 96.0;
+            const RECT& work = monitor.rcWork;
+            const int width = static_cast<int>(
+                (popupFeatures.widthSet ? popupFeatures.width : 480) * scale);
+            const int height = static_cast<int>(
+                (popupFeatures.heightSet ? popupFeatures.height : 270) * scale);
+            const int margin = static_cast<int>(16 * scale);
+            windowInfo.bounds.width = (std::min)(width, static_cast<int>(work.right - work.left));
+            windowInfo.bounds.height = (std::min)(height, static_cast<int>(work.bottom - work.top));
+            windowInfo.bounds.x = work.right - windowInfo.bounds.width - margin;
+            // Bounds are the content area; CEF adds the frame around it.
+            windowInfo.bounds.y = work.bottom - windowInfo.bounds.height - margin -
+                                  GetSystemMetricsForDpi(SM_CYCAPTION, dpi);
+        }
+        windowInfo.ex_style |= WS_EX_TOPMOST;
+#endif
         return false;
     }
     loadUrl(browser->GetIdentifier(), target_url);
@@ -396,18 +415,11 @@ void WebviewHandler::OnLoadError(CefRefPtr<CefBrowser> browser,
                                 const CefString& failedUrl) {
     CEF_REQUIRE_UI_THREAD();
 
-    // Don't display an error for downloaded files.
-    if (errorCode == ERR_ABORTED)
-        return;
-    
-    // Display a load error message using a data: URI.
-    std::stringstream ss;
-    ss << "<html><body bgcolor=\"white\">"
-    "<h2>Failed to load URL "
-    << std::string(failedUrl) << " with error " << std::string(errorText)
-    << " (" << errorCode << ").</h2></body></html>";
-    
-    frame->LoadURL(GetDataURI(ss.str(), "text/html"));
+    // 6browser patch: upstream replaced the failed frame with its own data:
+    // URI page here. Chromium already commits its own error page (with Reload
+    // and the failed URL kept in history and the address bar), and loading a
+    // new URL over it could also cancel a navigation that was about to
+    // recover, such as the HTTPS-Upgrades fallback to http://.
 }
 
 void WebviewHandler::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,

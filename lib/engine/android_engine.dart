@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
+import '../features/tabs/url_input.dart';
 import 'browser_engine.dart';
 
 /// [BrowserEngine] backed by the platform WebView (Android System WebView /
@@ -50,12 +51,28 @@ class AndroidBrowserView implements BrowserView {
             _isLoading.value = true;
           },
           onPageFinished: (u) async {
+            _clearHttpFallback();
             _url.value = u;
             _isLoading.value = false;
             final t = await _controller.getTitle();
             if (t != null && t.isNotEmpty) _title.value = t;
           },
           onProgress: (_) {},
+          onWebResourceError: (error) {
+            if (error.isForMainFrame != false && _isHttpsAttempt(error.url)) {
+              _fallBackToHttp();
+            }
+          },
+          onSslAuthError: (error) {
+            // Never proceed past a bad certificate; for an upgraded load the
+            // site simply has no working HTTPS, so use the address as typed.
+            error.cancel();
+            final platform = error.platform;
+            if (platform is AndroidSslAuthError &&
+                _isHttpsAttempt(platform.url)) {
+              _fallBackToHttp();
+            }
+          },
         ),
       )
       ..addJavaScriptChannel(
@@ -94,7 +111,7 @@ class AndroidBrowserView implements BrowserView {
       debugPrint('Screen sharing setup failed: ${error.message}');
     }
     if (_disposed) return;
-    await _controller.loadRequest(Uri.parse(initialUrl));
+    await load(initialUrl);
     if (!_disposed) _isReady.value = true;
   }
 
@@ -153,8 +170,35 @@ class AndroidBrowserView implements BrowserView {
   @override
   Widget get widget => WebViewWidget(controller: _controller);
 
+  // The WebView has no HTTPS Upgrades, so http:// addresses are tried over
+  // HTTPS first and loaded as typed only if that fails (like Chrome).
+  String? _httpsAttempt;
+  String? _httpFallback;
+
+  void _clearHttpFallback() => _httpsAttempt = _httpFallback = null;
+
+  bool _isHttpsAttempt(String? url) {
+    final attempt = _httpsAttempt;
+    if (attempt == null || url == null) return false;
+    final uri = Uri.tryParse(url);
+    return uri != null &&
+        uri.scheme == 'https' &&
+        uri.host == Uri.parse(attempt).host;
+  }
+
+  void _fallBackToHttp() {
+    final url = _httpFallback;
+    _clearHttpFallback();
+    if (url != null && !_disposed) _controller.loadRequest(Uri.parse(url));
+  }
+
   @override
-  Future<void> load(String url) => _controller.loadRequest(Uri.parse(url));
+  Future<void> load(String url) {
+    final upgraded = httpsUpgradeOf(url);
+    _httpsAttempt = upgraded;
+    _httpFallback = upgraded == null ? null : url;
+    return _controller.loadRequest(Uri.parse(upgraded ?? url));
+  }
 
   @override
   Future<void> goBack() async {

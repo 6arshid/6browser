@@ -14,6 +14,103 @@
 
 namespace {
 
+// See WebviewApp::OnContextCreated.
+const char kVideoPictureInPictureShim[] = R"JS((() => {
+  const pip = window.documentPictureInPicture;
+  if (!pip || window !== top || !window.HTMLVideoElement) return;
+  const define = (target, name, value) => Object.defineProperty(target, name,
+      {configurable: true, writable: true, value});
+  let active = null;
+
+  const pipWindowFor = (win) => {
+    const target = new EventTarget();
+    target.onresize = null;
+    Object.defineProperties(target, {
+      width: {get: () => win.innerWidth},
+      height: {get: () => win.innerHeight},
+    });
+    win.addEventListener('resize', () => {
+      const event = new Event('resize');
+      target.dispatchEvent(event);
+      if (typeof target.onresize === 'function') target.onresize(event);
+    });
+    return target;
+  };
+  const fire = (video, type, pictureInPictureWindow) => {
+    const event = new Event(type, {bubbles: true});
+    Object.defineProperty(event, 'pictureInPictureWindow', {value: pictureInPictureWindow});
+    video.dispatchEvent(event);
+  };
+  // Puts the video back in the page; runs when the PiP window closes.
+  const restore = (entry) => {
+    if (active !== entry) return;
+    active = null;
+    const {video, placeholder} = entry;
+    const playing = !video.paused;
+    if (placeholder.isConnected) placeholder.replaceWith(video);
+    else { video.pause(); video.remove(); }
+    video.controls = entry.controls;
+    if (playing && video.paused && video.isConnected) video.play().catch(() => {});
+    fire(video, 'leavepictureinpicture', entry.pipWindow);
+  };
+
+  define(HTMLVideoElement.prototype, 'requestPictureInPicture', async function () {
+    if (this.disablePictureInPicture) {
+      throw new DOMException('Picture-in-Picture is disabled for this video', 'InvalidStateError');
+    }
+    if (this.readyState === 0 || !this.isConnected) {
+      throw new DOMException('The video is not ready', 'InvalidStateError');
+    }
+    if (active && active.video === this) return active.pipWindow;
+    const ratio = this.videoWidth && this.videoHeight ? this.videoWidth / this.videoHeight : 16 / 9;
+    const width = 480;
+    const win = await pip.requestWindow({width, height: Math.round(width / ratio)});
+    if (active) restore(active);
+
+    const doc = win.document;
+    const style = doc.createElement('style');
+    style.textContent = 'html,body{margin:0;height:100%;background:#000;overflow:hidden}' +
+      'video{position:fixed!important;inset:0!important;width:100%!important;' +
+      'height:100%!important;max-width:none!important;max-height:none!important;' +
+      'margin:0!important;transform:none!important;object-fit:contain!important}';
+    doc.head.append(style);
+    doc.title = document.title;
+
+    // Keep the page layout while the video is away.
+    const rect = this.getBoundingClientRect();
+    const placeholder = document.createElement('div');
+    placeholder.style.cssText = this.style.cssText;
+    placeholder.style.width = rect.width + 'px';
+    placeholder.style.height = rect.height + 'px';
+    placeholder.style.background = '#000';
+
+    const playing = !this.paused;
+    const entry = {video: this, placeholder, win, controls: this.controls, pipWindow: pipWindowFor(win)};
+    active = entry;
+    this.replaceWith(placeholder);
+    doc.body.append(this);
+    this.controls = true;
+    if (playing && this.paused) this.play().catch(() => {});
+    win.addEventListener('pagehide', () => restore(entry), {once: true});
+    addEventListener('pagehide', () => win.close(), {once: true});
+    fire(this, 'enterpictureinpicture', entry.pipWindow);
+    return entry.pipWindow;
+  });
+
+  define(Document.prototype, 'exitPictureInPicture', async function () {
+    if (this !== document || !active) {
+      throw new DOMException('There is no Picture-in-Picture element', 'InvalidStateError');
+    }
+    const entry = active;
+    restore(entry);
+    entry.win.close();
+  });
+  Object.defineProperty(Document.prototype, 'pictureInPictureElement', {
+    configurable: true,
+    get() { return this === document && active ? active.video : null; },
+  });
+})();)JS";
+
 // When using the Views framework this object provides the delegate
 // implementation for the CefWindow that hosts the Views-based browser.
 class SimpleWindowDelegate : public CefWindowDelegate {
@@ -286,6 +383,17 @@ void WebviewApp::OnBrowserDestroyed(CefRefPtr<CefBrowser> browser)
 
 void WebviewApp::OnContextCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context)
 {
+    // 6browser patch: off-screen browsers have no native video
+    // Picture-in-Picture (Alloy returns NotSupportedError), so <video> PiP is
+    // emulated by moving the video into a Document Picture-in-Picture window.
+    // Runs before the page's own scripts; Document PiP is top-level only.
+    const std::string url = frame->GetURL().ToString();
+    if (frame->IsMain() &&
+        (url.rfind("https://", 0) == 0 || url.rfind("http://", 0) == 0)) {
+        CefRefPtr<CefV8Value> result;
+        CefRefPtr<CefV8Exception> exception;
+        context->Eval(kVideoPictureInPictureShim, url, 0, result, exception);
+    }
 }
 
 void WebviewApp::OnContextReleased(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context)
