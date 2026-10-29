@@ -1,4 +1,5 @@
 import 'package:flutter/gestures.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -45,12 +46,9 @@ class BookmarksBar extends ConsumerWidget {
     final colors = BrowserColors.of(context);
     final db = ref.read(databaseProvider);
     return Container(
-      height: 34,
-      decoration: BoxDecoration(
-        color: colors.toolbar,
-        border: Border(bottom: BorderSide(color: colors.separator)),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      height: 32,
+      color: colors.toolbar,
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
       child: Row(
         children: [
           Expanded(
@@ -81,7 +79,7 @@ class BookmarksBar extends ConsumerWidget {
                     tree: tree,
                     folderId: null,
                     onDrop: (id) => db.moveBookmark(id),
-                    child: const SizedBox(width: 48, height: 34),
+                    child: const SizedBox(width: 48, height: 28),
                   ),
                 ],
               ),
@@ -89,10 +87,11 @@ class BookmarksBar extends ConsumerWidget {
           ),
           IconButton(
             tooltip: 'All bookmarks',
-            iconSize: 18,
+            iconSize: 15,
             color: colors.icon,
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.bookmarks_outlined),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 28, height: 26),
+            icon: const Icon(CupertinoIcons.book),
             onPressed: () => openPage(context, const BookmarksPage()),
           ),
         ],
@@ -117,7 +116,7 @@ class _ChipFace extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (item.isFolder)
-          Icon(Icons.folder_outlined, size: 16, color: colors.icon)
+          Icon(CupertinoIcons.folder, size: 16, color: colors.icon)
         else
           Favicon(url: item.url!, color: colors.icon),
         const SizedBox(width: 6),
@@ -216,7 +215,7 @@ class _ChipLabel extends StatelessWidget {
     mainAxisSize: MainAxisSize.min,
     children: [
       if (item.isFolder)
-        Icon(Icons.folder_outlined, size: 16, color: colors.icon)
+        Icon(CupertinoIcons.folder, size: 16, color: colors.icon)
       else
         Favicon(url: item.url!, color: colors.icon),
       const SizedBox(width: 6),
@@ -250,7 +249,7 @@ class _FolderChip extends ConsumerWidget {
       for (final b in items)
         if (b.isFolder)
           SubmenuButton(
-            leadingIcon: const Icon(Icons.folder_outlined, size: 18),
+            leadingIcon: const Icon(CupertinoIcons.folder, size: 18),
             menuChildren: _entries(ref, b.id, iconColor),
             child: _MenuLabel(_label(b)),
           )

@@ -248,8 +248,14 @@ namespace webview_cef {
 		const UINT fallbackMs = QueryRefreshIntervalMs();
 		while (g_vsyncRunning) {
 			if (output) {
+				const auto start = std::chrono::steady_clock::now();
 				if (FAILED(output->WaitForVBlank())) {
 					output.Reset();
+				} else if (std::chrono::steady_clock::now() - start < std::chrono::milliseconds(1)) {
+					// 6browser patch: monitor off, locked session or remote
+					// desktop return at once; don't spin a core (as Chromium's
+					// vsync_thread_win.cc does).
+					std::this_thread::sleep_for(std::chrono::milliseconds(fallbackMs));
 				}
 			}
 			if (!output) {
@@ -296,13 +302,24 @@ namespace webview_cef {
 			// rendered inside the web page via ImeSetComposition.
 			lparam &= ~ISC_SHOWUICOMPOSITIONWINDOW;
 			return DefSubclassProc(hwnd, message, wparam, lparam);
-		case WM_IME_STARTCOMPOSITION:
+		case WM_IME_STARTCOMPOSITION: {
 			// Suppress default composition UI; we drive composition ourselves.
-			return 0;
+			// 6browser patch: only for the page; the address bar and other
+			// Flutter text fields need the normal IME flow.
+			auto pit = webviewPlugins.find(hwnd);
+			if (pit != webviewPlugins.end() && pit->second->isEditableFocused()) return 0;
+			return DefSubclassProc(hwnd, message, wparam, lparam);
+		}
 		case WM_IME_COMPOSITION: {
 			auto pit = webviewPlugins.find(hwnd);
 			if (pit == webviewPlugins.end() || !pit->second->isEditableFocused()) {
 				return DefSubclassProc(hwnd, message, wparam, lparam);
+			}
+			// 6browser patch: Esc (no flags) or a preedit erased to nothing
+			// cancels; it used to stay and be committed at the end.
+			if (lparam == 0) {
+				pit->second->imeCancelCompositionNative();
+				return 0;
 			}
 			HIMC imc = ImmGetContext(hwnd);
 			if (imc) {
@@ -324,6 +341,8 @@ namespace webview_cef {
 						int cursor = static_cast<int>(
 							ImmGetCompositionStringW(imc, GCS_CURSORPOS, nullptr, 0));
 						pit->second->imeSetCompositionNative(ws, cursor);
+					} else if (!(lparam & GCS_RESULTSTR)) {
+						pit->second->imeCancelCompositionNative();
 					}
 				}
 				ImmReleaseContext(hwnd, imc);
@@ -462,9 +481,12 @@ namespace webview_cef {
 		case WM_KEYDOWN:
 		case WM_KEYUP:
 		case WM_CHAR: {
-			if (webviewPlugins.find(hwnd) != webviewPlugins.end()) {
+			// 6browser patch: only while a page has the keyboard focus, or
+			// typing in the address bar also typed into the page.
+			auto pit = webviewPlugins.find(hwnd);
+			if (pit != webviewPlugins.end() && pit->second->getAnyBrowserFocused()) {
 				CefKeyEvent keyEvent = getCefKeyEvent(message, wparam, lparam);
-				webviewPlugins[hwnd]->sendKeyEvent(keyEvent);
+				pit->second->sendKeyEvent(keyEvent);
 			}
 			break;
 		}

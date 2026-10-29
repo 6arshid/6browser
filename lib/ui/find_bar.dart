@@ -1,7 +1,9 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../engine/browser_engine.dart';
+import 'browser_theme.dart';
 
 /// Chrome's find-in-page box (Ctrl+F): typing searches as you go, Enter /
 /// Shift+Enter (or F3 / Shift+F3) step through matches, Esc closes.
@@ -27,14 +29,28 @@ class FindBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Material(
-      elevation: 4,
-      color: scheme.surfaceContainerHigh,
-      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(10)),
+    final light = scheme.brightness == Brightness.light;
+    Widget step(String tooltip, IconData icon, VoidCallback onPressed) =>
+        IconButton(
+          tooltip: tooltip,
+          iconSize: 14,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+          icon: Icon(icon),
+          onPressed: onPressed,
+        );
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      decoration: BoxDecoration(
+        color: light ? Colors.white : const Color(0xFF2C2C2E),
+        borderRadius: BorderRadius.circular(Ui.radiusLarge),
+        border: Border.all(color: scheme.outlineVariant),
+        boxShadow: Ui.shadow(scheme.brightness),
+      ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+        padding: const EdgeInsets.fromLTRB(12, 4, 6, 4),
         child: SizedBox(
-          width: 360,
+          width: 340,
           child: Row(
             children: [
               Expanded(
@@ -53,10 +69,16 @@ class FindBar extends StatelessWidget {
                     key: const ValueKey('find-field'),
                     controller: controller,
                     focusNode: focusNode,
+                    style: const TextStyle(fontSize: 13.5),
                     decoration: const InputDecoration(
                       hintText: 'Find in page',
+                      filled: false,
                       border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
                       isDense: true,
+                      prefixIcon: Icon(CupertinoIcons.search, size: 15),
+                      prefixIconConstraints: BoxConstraints(minWidth: 26),
                     ),
                     onChanged: (t) => view.find(t),
                   ),
@@ -72,26 +94,15 @@ class FindBar extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 4),
-              const SizedBox(height: 24, child: VerticalDivider()),
-              IconButton(
-                tooltip: 'Previous (Shift+Enter)',
-                iconSize: 20,
-                icon: const Icon(Icons.keyboard_arrow_up),
-                onPressed: () => _step(false),
-              ),
-              IconButton(
-                tooltip: 'Next (Enter)',
-                iconSize: 20,
-                icon: const Icon(Icons.keyboard_arrow_down),
-                onPressed: () => _step(true),
-              ),
-              IconButton(
-                tooltip: 'Close (Esc)',
-                iconSize: 20,
-                icon: const Icon(Icons.close),
-                onPressed: onClose,
-              ),
+              const SizedBox(width: 6),
+              step('Previous (Shift+Enter)', CupertinoIcons.chevron_up, () {
+                _step(false);
+              }),
+              step('Next (Enter)', CupertinoIcons.chevron_down, () {
+                _step(true);
+              }),
+              const SizedBox(width: 2),
+              step('Close (Esc)', CupertinoIcons.xmark, onClose),
             ],
           ),
         ),

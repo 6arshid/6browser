@@ -5,6 +5,7 @@
 #ifndef CEF_TESTS_CEFSIMPLE_SIMPLE_HANDLER_H_
 #define CEF_TESTS_CEFSIMPLE_SIMPLE_HANDLER_H_
 
+#include <chrono>
 #include "include/cef_client.h"
 
 #include <functional>
@@ -27,6 +28,7 @@ struct browser_info{
     uint32_t height = 1;
     float dpi = 1.0;
     bool is_dragging = false;
+    bool left_button_down = false;
     CefRect prev_ime_position = CefRect();
     bool is_ime_commit = false;
     // Focus the host requested (via setClientFocus) and whether it has been
@@ -35,6 +37,15 @@ struct browser_info{
     // right after creation is lost; we re-apply it once the first frame lands.
     bool wants_focus = false;
     bool focus_reasserted = false;
+    // 6browser patch: scroll distance (DIP) not yet sent to CEF.
+    double scroll_rest_x = 0;
+    double scroll_rest_y = 0;
+    // 6browser patch: the open popup widget (<select> dropdown), in view
+    // coordinates.
+    bool popup_visible = false;
+    CefRect popup_rect;
+    // 6browser patch: when the page's renderer last crashed.
+    std::chrono::steady_clock::time_point last_crash;
 };
 
 // 6browser patch: what was under the cursor when a context menu was requested.
@@ -62,6 +73,8 @@ public CefDownloadHandler,
 public CefContextMenuHandler,
 public CefPermissionHandler,
 public CefFindHandler,
+public CefRequestHandler,
+public CefKeyboardHandler,
 public CefRenderHandler{
 public:
     //Paint callback (software off-screen rendering)
@@ -70,6 +83,10 @@ public:
     //is the OnAcceleratedPaint shared-texture HANDLE; |format| is a
     //cef_color_type_t. Only fired when shared textures are enabled.
     std::function<void(int browserId, const void* sharedHandle, int32_t width, int32_t height, int32_t format)> onAcceleratedPaintCallback;
+    // 6browser patch: popup widget frames, at (x, y) pixels in the view, and
+    // the popup closing.
+    std::function<void(int browserId, const void* sharedHandle, int32_t x, int32_t y)> onAcceleratedPopupCallback;
+    std::function<void(int browserId)> onPopupHiddenCallback;
     //cef message event
     std::function<void(int browserId, std::string url)> onUrlChangedEvent;
     std::function<void(int browserId, std::string title)> onTitleChangedEvent;
@@ -88,6 +105,12 @@ public:
     std::function<void(int browserId, const context_menu_info& info)> onContextMenuEvent;
     std::function<void(int browserId, int count, int activeMatch, bool finalUpdate)> onFindResultEvent;
     std::function<void(int browserId, double level)> onZoomChangedEvent;
+    // 6browser patch: a link or script asked for a new tab/window
+    // (cef_window_open_disposition_t); the host opens it as a tab.
+    std::function<void(int browserId, std::string url, int disposition)> onNewWindowEvent;
+    // 6browser patch: a key press the page did not handle (Windows virtual
+    // key code, CEF modifier flags), for the host's shortcuts.
+    std::function<void(int browserId, int keyCode, int modifiers)> onUnhandledKeyEvent;
     
     explicit WebviewHandler();
     ~WebviewHandler();
@@ -143,6 +166,23 @@ public:
                            CefRefPtr<CefDownloadItemCallback> callback) override;
     virtual CefRefPtr<CefRenderHandler> GetRenderHandler() override { return this; }
 
+    // 6browser patch: Ctrl/Shift/middle clicks on links open new tabs; a
+    // crashed renderer shows an error page instead of a frozen frame.
+    CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+    CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
+    bool OnKeyEvent(CefRefPtr<CefBrowser> browser,
+                    const CefKeyEvent& event,
+                    CefEventHandle os_event) override;
+    bool OnOpenURLFromTab(CefRefPtr<CefBrowser> browser,
+                          CefRefPtr<CefFrame> frame,
+                          const CefString& target_url,
+                          CefRequestHandler::WindowOpenDisposition target_disposition,
+                          bool user_gesture) override;
+    void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser,
+                                   TerminationStatus status,
+                                   int error_code,
+                                   const CefString& error_string) override;
+
 	bool OnProcessMessageReceived(
         CefRefPtr<CefBrowser> browser,
 		CefRefPtr<CefFrame> frame,
@@ -176,7 +216,7 @@ public:
                                int popup_id,
                                const CefString& target_url,
                                const CefString& target_frame_name,
-                               WindowOpenDisposition target_disposition,
+                               CefLifeSpanHandler::WindowOpenDisposition target_disposition,
                                bool user_gesture,
                                const CefPopupFeatures& popupFeatures,
                                CefWindowInfo& windowInfo,
@@ -201,12 +241,18 @@ public:
     virtual void OnLoadStart(CefRefPtr<CefBrowser> browser,
                              CefRefPtr<CefFrame> frame,
                              CefLoadHandler::TransitionType transition_type) override;
+    void OnLoadingStateChange(CefRefPtr<CefBrowser> browser,
+                              bool isLoading,
+                              bool canGoBack,
+                              bool canGoForward) override;
     
     // CefRenderHandler methods:
     virtual void GetViewRect(CefRefPtr<CefBrowser> browser, CefRect& rect) override;
     virtual void OnPaint(CefRefPtr<CefBrowser> browser, PaintElementType type, const RectList& dirtyRects, const void* buffer, int width, int height) override;
     virtual void OnAcceleratedPaint(CefRefPtr<CefBrowser> browser, PaintElementType type, const RectList& dirtyRects, const CefAcceleratedPaintInfo& info) override;
     virtual bool GetScreenInfo(CefRefPtr<CefBrowser> browser, CefScreenInfo& screen_info) override;
+    void OnPopupShow(CefRefPtr<CefBrowser> browser, bool show) override;
+    void OnPopupSize(CefRefPtr<CefBrowser> browser, const CefRect& rect) override;
     virtual bool StartDragging(CefRefPtr<CefBrowser> browser,
                                CefRefPtr<CefDragData> drag_data,
                                DragOperationsMask allowed_ops,
@@ -222,7 +268,7 @@ public:
     // (no cookies/cache/localStorage touch the disk) that is discarded when the
     // last incognito browser closes.
     void createBrowser(std::string url, std::function<void(int)> callback, bool incognito = false);
-    bool isIncognito(int browserId) const { return m_incognitoBrowsers.count(browserId) > 0; }
+    bool isIncognito(int browserId) const { return m_privateIds.count(browserId) > 0; }
 
     // Drives one external BeginFrame for every live browser (GPU path only).
     // Marshals to the CEF UI thread; safe to call from any thread.
@@ -233,11 +279,18 @@ public:
     // shared texture, which would otherwise be a silent black webview.
     void warnIfNoAcceleratedFrame();
 
-    void sendScrollEvent(int browserId, int x, int y, int deltaX, int deltaY);
+    void sendScrollEvent(int browserId, int x, int y, double deltaX, double deltaY, int modifiers);
+    void reportZoomFor(int browserId);
+    // 6browser patch: background tabs stop rendering, as in Chrome.
+    void setVisible(int browserId, bool visible);
+    void openInNewTab(CefRefPtr<CefBrowser> browser, const CefString& url,
+                      int disposition, bool user_gesture);
     void changeSize(int browserId, float a_dpi, int width, int height);
     // |button|: 0 left, 1 middle, 2 right (cef_mouse_button_type_t).
-    void cursorClick(int browserId, int x, int y, bool up, int button = 0);
-    void cursorMove(int browserId, int x, int y, bool dragging);
+    void cursorClick(int browserId, int x, int y, bool up, int button = 0, int clickCount = 1, int modifiers = 0);
+    void cursorMove(int browserId, int x, int y, bool dragging, int modifiers = 0);
+    void cursorLeave(int browserId, int x, int y);
+    void cursorCancel(int browserId, int x, int y, int button);
     void sendKeyEvent(CefKeyEvent& ev);
     void loadUrl(int browserId, std::string url);
     void goForward(int browserId);
@@ -267,6 +320,10 @@ public:
     // Native IME pipeline (Windows WM_IME_*): operate on the currently focused
     // browser. |text| is UTF-16 read from the IMM composition string.
     CefRefPtr<CefBrowser> getFocusedBrowser();
+    void imeCancelComposition();
+    // 6browser patch: keys and IME go to the browser the host focused
+    // (setClientFocus), never to a background tab or DevTools.
+    int focused_browser_id_ = 0;
     void imeSetCompositionNative(const std::wstring& text, int cursor);
     void imeCommitTextNative(const std::wstring& text);
     void imeFinishComposition();
@@ -284,6 +341,8 @@ private:
     // List of existing browser windows. Only accessed on the CEF UI thread.
     std::unordered_map<int, browser_info> browser_map_;
     std::set<int> m_incognitoBrowsers;
+    // Every private browser ever opened (its downloads may outlive it).
+    std::set<int> m_privateIds;
     CefRefPtr<CefRequestContext> m_incognitoContext;
 
     std::unordered_map<std::string, std::function<void(CefRefPtr<CefValue>)>> js_callbacks_;

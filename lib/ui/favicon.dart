@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 
 import '../features/tabs/url_input.dart';
@@ -18,7 +19,7 @@ class Favicon extends StatelessWidget {
     if (isNewTabUrl(url)) {
       return Image.asset('assets/logo.png', width: size, height: size);
     }
-    final globe = Icon(Icons.public, size: size, color: color);
+    final globe = Icon(CupertinoIcons.globe, size: size, color: color);
     final uri = Uri.tryParse(url);
     if (uri == null || !isBookmarkable(url) || uri.host.isEmpty) return globe;
     return Image.network(

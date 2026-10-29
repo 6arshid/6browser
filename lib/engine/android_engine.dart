@@ -253,6 +253,14 @@ class AndroidBrowserView implements BrowserView {
   @override
   Stream<PageContextMenu> get contextMenus => const Stream.empty();
   @override
+  Stream<NewTabRequest> get newTabRequests => const Stream.empty();
+  @override
+  Stream<PageKey> get unhandledKeys => const Stream.empty();
+  @override
+  void focus() {}
+  @override
+  void setVisible(bool visible) {}
+  @override
   Future<void> editCommand(EditCommand command) async {}
   @override
   Future<void> download(String url) async {}

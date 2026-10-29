@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -52,15 +53,15 @@ class MobileBottomBar extends ConsumerWidget {
         height: 56,
         child: Row(
           children: [
-            slot('Back', const Icon(Icons.arrow_back_rounded), view?.goBack),
+            slot('Back', const Icon(CupertinoIcons.chevron_left), view?.goBack),
             slot(
               'Forward',
-              const Icon(Icons.arrow_forward_rounded),
+              const Icon(CupertinoIcons.chevron_right),
               view?.goForward,
             ),
             slot(
               'Home',
-              const Icon(Icons.home_outlined),
+              const Icon(CupertinoIcons.house),
               view == null ? null : () => view.load(settings.homeUrl),
             ),
             slot(
@@ -70,7 +71,7 @@ class MobileBottomBar extends ConsumerWidget {
             ),
             slot(
               'Menu',
-              const Icon(Icons.menu_rounded),
+              const Icon(CupertinoIcons.ellipsis_circle),
               () => showMobileMenu(context),
             ),
           ],
@@ -135,39 +136,35 @@ class _MobileMenu extends ConsumerWidget {
 
     final shell = Navigator.of(context).context;
     final items = <(IconData, String, VoidCallback)>[
-      (Icons.add_box_outlined, 'New tab', () => run(ctl.newTab)),
+      (CupertinoIcons.plus_square, 'New tab', () => run(ctl.newTab)),
+      (CupertinoIcons.eye_slash, 'Private tab', () => run(ctl.newIncognitoTab)),
       (
-        Icons.visibility_off_outlined,
-        'Private tab',
-        () => run(ctl.newIncognitoTab),
-      ),
-      (
-        Icons.bookmarks_outlined,
+        CupertinoIcons.book,
         'Bookmarks',
         () => run(() => openPage(shell, const BookmarksPage())),
       ),
       (
-        Icons.history_rounded,
+        CupertinoIcons.clock,
         'History',
         () => run(() => openPage(shell, const HistoryPage())),
       ),
       (
-        Icons.download_outlined,
+        CupertinoIcons.arrow_down_circle,
         'Downloads',
         () => run(() => openPage(shell, const DownloadsPage())),
       ),
       (
-        Icons.palette_outlined,
+        CupertinoIcons.paintbrush,
         'Appearance',
         () => run(() => showCustomizePanel(shell)),
       ),
       (
-        Icons.move_to_inbox_outlined,
+        CupertinoIcons.tray_arrow_down,
         'Import',
         () => run(() => openPage(shell, const ImportPage())),
       ),
       (
-        Icons.settings_outlined,
+        CupertinoIcons.gear,
         'Settings',
         () => run(() => openPage(shell, const SettingsPage())),
       ),
@@ -271,7 +268,7 @@ class _PageCard extends ConsumerWidget {
                 tooltip: bookmarked ? 'Remove bookmark' : 'Bookmark this page',
                 color: bookmarked ? scheme.primary : scheme.onSurfaceVariant,
                 icon: Icon(
-                  bookmarked ? Icons.star_rounded : Icons.star_border_rounded,
+                  bookmarked ? CupertinoIcons.star_fill : CupertinoIcons.star,
                 ),
                 onPressed: () => bookmarked
                     ? db.removeBookmarkByUrl(url)
@@ -280,7 +277,7 @@ class _PageCard extends ConsumerWidget {
               IconButton(
                 tooltip: 'Copy link',
                 color: scheme.onSurfaceVariant,
-                icon: const Icon(Icons.link_rounded),
+                icon: const Icon(CupertinoIcons.link),
                 onPressed: () {
                   final messenger = ScaffoldMessenger.of(context);
                   onDone(() {
@@ -297,7 +294,7 @@ class _PageCard extends ConsumerWidget {
               IconButton(
                 tooltip: 'Reload',
                 color: scheme.onSurfaceVariant,
-                icon: const Icon(Icons.refresh_rounded),
+                icon: const Icon(CupertinoIcons.arrow_clockwise),
                 onPressed: () => onDone(view.reload),
               ),
             ],
@@ -419,13 +416,13 @@ class _TabSwitcherPageState extends ConsumerState<TabSwitcherPage> {
               segments: [
                 ButtonSegment(
                   value: false,
-                  icon: const Icon(Icons.tab_outlined, size: 18),
+                  icon: const Icon(CupertinoIcons.square_on_square, size: 18),
                   label: Text('${normal.length}'),
                   tooltip: 'Tabs',
                 ),
                 ButtonSegment(
                   value: true,
-                  icon: const Icon(Icons.visibility_off_outlined, size: 18),
+                  icon: const Icon(CupertinoIcons.eye_slash, size: 18),
                   label: Text('${private.length}'),
                   tooltip: 'Private tabs',
                 ),
@@ -479,7 +476,7 @@ class _TabSwitcherPageState extends ConsumerState<TabSwitcherPage> {
                   },
                 ),
           floatingActionButton: FloatingActionButton.extended(
-            icon: const Icon(Icons.add),
+            icon: const Icon(CupertinoIcons.add),
             label: Text(_private ? 'Private tab' : 'New tab'),
             onPressed: () {
               _private ? ctl.newIncognitoTab() : ctl.newTab();
@@ -517,7 +514,9 @@ class _EmptyTabs extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              private ? Icons.visibility_off_outlined : Icons.tab_outlined,
+              private
+                  ? CupertinoIcons.eye_slash
+                  : CupertinoIcons.square_on_square,
               size: 56,
               color: scheme.onSurfaceVariant,
             ),
@@ -590,7 +589,11 @@ class TabCard extends StatelessWidget {
                   child: Row(
                     children: [
                       if (tab.pinned)
-                        Icon(Icons.push_pin, size: 14, color: scheme.primary)
+                        Icon(
+                          CupertinoIcons.pin_fill,
+                          size: 14,
+                          color: scheme.primary,
+                        )
                       else
                         Favicon(url: url, size: 16),
                       const SizedBox(width: 8),
@@ -610,7 +613,7 @@ class TabCard extends StatelessWidget {
                         tooltip: 'Close tab',
                         visualDensity: VisualDensity.compact,
                         iconSize: 18,
-                        icon: const Icon(Icons.close_rounded),
+                        icon: const Icon(CupertinoIcons.xmark),
                         onPressed: onClose,
                       ),
                     ],
@@ -630,7 +633,7 @@ class TabCard extends StatelessWidget {
                         ),
                         child: view.incognito && isNewTabUrl(url)
                             ? Icon(
-                                Icons.visibility_off_outlined,
+                                CupertinoIcons.eye_slash,
                                 size: 32,
                                 color: scheme.onSurfaceVariant,
                               )

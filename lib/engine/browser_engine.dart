@@ -26,6 +26,12 @@ abstract class BrowserView {
   bool get incognito;
 
   Future<void> load(String url);
+
+  /// Gives the page the keyboard focus.
+  void focus();
+
+  /// Background tabs are hidden: they stop rendering, as in Chrome.
+  void setVisible(bool visible);
   Future<void> goBack();
   Future<void> goForward();
   Future<void> reload();
@@ -63,6 +69,15 @@ abstract class BrowserView {
   /// menu. Backends that show a native menu themselves never emit.
   Stream<PageContextMenu> get contextMenus;
 
+  /// Pages asking for a new tab: target=_blank links, window.open, Ctrl or
+  /// middle clicks. Backends that open such links in place never emit.
+  Stream<NewTabRequest> get newTabRequests;
+
+  /// Key presses the page did not handle, so browser shortcuts that pages
+  /// may claim (Ctrl+F, Ctrl+K...) run only when the page leaves them.
+  /// Backends whose keys never reach the page first never emit.
+  Stream<PageKey> get unhandledKeys;
+
   /// Runs an editing command on the focused frame.
   Future<void> editCommand(EditCommand command);
 
@@ -88,6 +103,33 @@ abstract class BrowserView {
 }
 
 enum EditCommand { undo, redo, cut, copy, paste, delete, selectAll }
+
+/// A key press the page left alone: a Windows virtual-key code and the
+/// modifiers held.
+class PageKey {
+  const PageKey(
+    this.keyCode, {
+    this.control = false,
+    this.shift = false,
+    this.alt = false,
+    this.meta = false,
+  });
+
+  final int keyCode;
+  final bool control;
+  final bool shift;
+  final bool alt;
+  final bool meta;
+}
+
+/// A page asked to open [url] in a new tab; [background] for Ctrl and middle
+/// clicks, which leave the current tab selected.
+class NewTabRequest {
+  const NewTabRequest(this.url, {this.background = false});
+
+  final String url;
+  final bool background;
+}
 
 /// Find-in-page progress: match [active] (1-based) of [count].
 class FindResult {

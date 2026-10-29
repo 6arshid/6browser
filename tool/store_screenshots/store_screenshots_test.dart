@@ -32,7 +32,10 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'mock_pages.dart';
 
-const outDir = 'store_listing/screenshots/raw';
+/// Where the PNGs go; SHOT_DIR overrides it (e.g. to preview a change
+/// without touching the store listing).
+final outDir =
+    Platform.environment['SHOT_DIR'] ?? 'store_listing/screenshots/raw';
 
 class ShotView implements BrowserView {
   ShotView(String initial, {this.incognito = false})
@@ -96,6 +99,14 @@ class ShotView implements BrowserView {
   @override
   Stream<PageContextMenu> get contextMenus => menus.stream;
   @override
+  Stream<NewTabRequest> get newTabRequests => const Stream.empty();
+  @override
+  Stream<PageKey> get unhandledKeys => const Stream.empty();
+  @override
+  void focus() {}
+  @override
+  void setVisible(bool visible) {}
+  @override
   Future<void> editCommand(EditCommand command) async {}
   @override
   Future<void> download(String url) async {}
@@ -117,8 +128,10 @@ class ShotEngine implements BrowserEngine {
   @override
   Future<void> initialize() async {}
   @override
-  BrowserView createView({required String initialUrl, bool incognito = false}) =>
-      ShotView(initialUrl, incognito: incognito);
+  BrowserView createView({
+    required String initialUrl,
+    bool incognito = false,
+  }) => ShotView(initialUrl, incognito: incognito);
   @override
   Future<void> shutdown() async {}
   @override
@@ -139,12 +152,27 @@ Future<void> loadFonts() async {
 
   await family('MaterialIcons', ['$mat/materialicons-regular.otf']);
   await family('Roboto', [
-    for (final w in ['regular', 'medium', 'bold', 'light']) '$mat/roboto-$w.ttf',
+    for (final w in ['regular', 'medium', 'bold', 'light'])
+      '$mat/roboto-$w.ttf',
   ]);
   const win = 'C:/Windows/Fonts';
   await family('Segoe UI', [
-    for (final f in ['segoeui', 'segoeuib', 'segoeuisl', 'seguisb']) '$win/$f.ttf',
+    for (final f in ['segoeui', 'segoeuib', 'segoeuisl', 'seguisb'])
+      '$win/$f.ttf',
   ]);
+  // The app's first choice on Windows 11.
+  if (File('$win/SegUIVar.ttf').existsSync()) {
+    await family('Segoe UI Variable Text', ['$win/SegUIVar.ttf']);
+  }
+  // Toolbar and menu glyphs (CupertinoIcons, from the pub cache).
+  final config = File('.dart_tool/package_config.json').readAsStringSync();
+  final cupertino = RegExp(r'"rootUri": "file:///([^"]*cupertino_icons-[^"]*)"')
+      .firstMatch(config);
+  if (cupertino != null) {
+    await family('packages/cupertino_icons/CupertinoIcons', [
+      '${cupertino.group(1)}/assets/CupertinoIcons.ttf',
+    ]);
+  }
 }
 
 Future<void> seed(AppDatabase db) async {
@@ -165,10 +193,19 @@ Future<void> seed(AppDatabase db) async {
     }
   }
   const more = [
-    ('https://news.example.com/tech/fastest-browsers-2026', 'The fastest browsers of 2026, tested'),
+    (
+      'https://news.example.com/tech/fastest-browsers-2026',
+      'The fastest browsers of 2026, tested',
+    ),
     ('https://travel.example.org/japan/kyoto', 'Kyoto in 3 days — Wander'),
-    ('https://recipes.example.net/pasta/lemon-garlic', 'Lemon garlic pasta in 15 minutes'),
-    ('https://docs.example.com/getting-started', 'Getting started — Example Docs'),
+    (
+      'https://recipes.example.net/pasta/lemon-garlic',
+      'Lemon garlic pasta in 15 minutes',
+    ),
+    (
+      'https://docs.example.com/getting-started',
+      'Getting started — Example Docs',
+    ),
   ];
   for (final s in more) {
     await db.addHistory(s.$1, s.$2);
@@ -219,7 +256,11 @@ class Shot {
 
 String _url(String host) => 'https://$host';
 
-Future<void> open(ProviderContainer c, List<String> urls, {int active = -1}) async {
+Future<void> open(
+  ProviderContainer c,
+  List<String> urls, {
+  int active = -1,
+}) async {
   final ctl = c.read(tabsProvider.notifier);
   final first = c.read(tabsProvider).active!;
   await first.view.load(urls.first);
@@ -240,9 +281,15 @@ Future<void> settle(WidgetTester t) async {
   await t.pumpAndSettle();
 }
 
-Future<void> capture(WidgetTester t, GlobalKey key, String file, double dpr) async {
+Future<void> capture(
+  WidgetTester t,
+  GlobalKey key,
+  String file,
+  double dpr,
+) async {
   await t.runAsync(() async {
-    final boundary = key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    final boundary =
+        key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
     final image = await boundary.toImage(pixelRatio: dpr);
     final data = await image.toByteData(format: ui.ImageByteFormat.png);
     final f = File('$outDir/$file.png')..createSync(recursive: true);
@@ -319,7 +366,10 @@ class _App extends ConsumerWidget {
           ? ThemeMode.light
           : settings.themeMode,
       theme: buildTheme(brightness: Brightness.light, seed: settings.colorSeed),
-      darkTheme: buildTheme(brightness: Brightness.dark, seed: settings.colorSeed),
+      darkTheme: buildTheme(
+        brightness: Brightness.dark,
+        seed: settings.colorSeed,
+      ),
       home: const BrowserShell(),
     );
   }

@@ -11,15 +11,18 @@ class WebviewTooltip {
   OverlayEntry? _overlayEntry;
   Timer? _timer;
   TooltipStatus _eStatus = TooltipStatus.hide;
+  String _text = '';
   Offset cursorOffset = Offset.zero;
   late RenderBox _box;
   final TextStyle _textStyle =
       const TextStyle(color: Colors.black, fontSize: 14);
 
-  void _buildOverlayEntry(String text) {
+  void _buildOverlayEntry() {
     //往Overlay中插入插入OverlayEntry
     _timer = Timer(const Duration(milliseconds: 500), () {
+      if (!_box.attached) return;
       _overlayEntry = OverlayEntry(builder: (context) {
+        final text = _text;
         double height = _box.size.height;
         double width = _box.size.width;
         TextPainter textPainter = TextPainter(
@@ -48,10 +51,13 @@ class WebviewTooltip {
         } else {
           cursorOffset = Offset(cursorOffset.dx + 15, cursorOffset.dy);
         }
+        // 6browser patch: never takes the pointer, or the page under it
+        // would stop getting hover and wheel events.
         return Positioned(
           top: cursorOffset.dy,
           left: cursorOffset.dx,
-          child: Material(
+          child: IgnorePointer(
+              child: Material(
             color: Colors.transparent,
             child: Container(
               width: textPainter.width + 16,
@@ -70,7 +76,7 @@ class WebviewTooltip {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-          ),
+          )),
         );
       });
       _overlayState.insert(_overlayEntry!);
@@ -79,18 +85,24 @@ class WebviewTooltip {
   }
 
   void showToolTip(String text) {
+    _text = text;
     if (text.isEmpty) {
-      if (_eStatus == TooltipStatus.prepare) {
-        _timer?.cancel();
-      } else {
-        _overlayEntry?.remove();
-      }
-      _eStatus = TooltipStatus.hide;
-      return;
+      hide();
     } else if (_eStatus == TooltipStatus.hide) {
       _eStatus = TooltipStatus.prepare;
-      _buildOverlayEntry(text);
+      _buildOverlayEntry();
+    } else {
+      // 6browser patch: another element's tooltip replaces the shown one.
+      _overlayEntry?.markNeedsBuild();
     }
+  }
+
+  /// 6browser patch: also used when the view goes away.
+  void hide() {
+    _timer?.cancel();
+    _overlayEntry?.remove();
+    _overlayEntry = null;
+    _eStatus = TooltipStatus.hide;
   }
 }
 

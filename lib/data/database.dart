@@ -647,6 +647,12 @@ class AppDatabase extends _$AppDatabase {
   Future<void> removeDownload(int id) =>
       (delete(downloads)..where((d) => d.id.equals(id))).go();
 
+  /// Downloads still "in progress" from an earlier run ended with it.
+  Future<void> endStaleDownloads() =>
+      (update(downloads)..where((d) => d.state.equals('inProgress'))).write(
+        const DownloadsCompanion(state: Value('canceled')),
+      );
+
   Future<void> clearFinishedDownloads() => (delete(
     downloads,
   )..where((d) => d.state.equals('inProgress').not())).go();

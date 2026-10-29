@@ -71,23 +71,49 @@ namespace webview_cef {
 		uninitCallback();
 		m_handler->CloseAllBrowsers(true);
 		m_handler = nullptr;
-		if(!m_renderers.empty()){
-			m_renderers.clear();
+		std::lock_guard<std::mutex> lock(m_renderersMutex);
+		m_renderers.clear();
+	}
+
+	std::shared_ptr<WebviewTexture> WebviewPlugin::rendererFor(int browserId) {
+		std::lock_guard<std::mutex> lock(m_renderersMutex);
+		auto it = m_renderers.find(browserId);
+		return it == m_renderers.end() ? nullptr : it->second;
+	}
+
+	std::vector<std::pair<int, std::shared_ptr<WebviewTexture>>> WebviewPlugin::renderersSnapshot() {
+		std::lock_guard<std::mutex> lock(m_renderersMutex);
+		std::vector<std::pair<int, std::shared_ptr<WebviewTexture>>> all;
+		for (auto& kv : m_renderers) {
+			if (kv.second) all.emplace_back(kv.first, kv.second);
 		}
+		return all;
 	}
 
 	void WebviewPlugin::initCallback() {
 		if (!m_init)
 		{
 			m_handler->onPaintCallback = [=, this](int browserId, const void* buffer, int32_t width, int32_t height) {
-				if (m_renderers.find(browserId) != m_renderers.end() && m_renderers[browserId] != nullptr) {
-					m_renderers[browserId]->onFrame(buffer, width, height);
+				if (auto renderer = rendererFor(browserId)) {
+					renderer->onFrame(buffer, width, height);
 				}
 			};
 
 			m_handler->onAcceleratedPaintCallback = [=, this](int browserId, const void* sharedHandle, int32_t width, int32_t height, int32_t format) {
-				if (m_renderers.find(browserId) != m_renderers.end() && m_renderers[browserId] != nullptr) {
-					m_renderers[browserId]->onAcceleratedFrame(sharedHandle, width, height, format);
+				if (auto renderer = rendererFor(browserId)) {
+					renderer->onAcceleratedFrame(sharedHandle, width, height, format);
+				}
+			};
+
+			m_handler->onAcceleratedPopupCallback = [=, this](int browserId, const void* sharedHandle, int32_t x, int32_t y) {
+				if (auto renderer = rendererFor(browserId)) {
+					renderer->onAcceleratedPopup(sharedHandle, x, y);
+				}
+			};
+
+			m_handler->onPopupHiddenCallback = [=, this](int browserId) {
+				if (auto renderer = rendererFor(browserId)) {
+					renderer->hidePopup();
 				}
 			};
 
@@ -236,10 +262,9 @@ namespace webview_cef {
 				// raw character keys to the OS IME while a web input is focused
 				// (the IME/delta path handles text). Focus moving to a new node
 				// also ends any prior composition for that browser.
-				auto rit = m_renderers.find(nBrowserId);
-				if (rit != m_renderers.end() && rit->second) {
-					rit->second->editableFocused = bEditable;
-					rit->second->composing = false;
+				if (auto renderer = rendererFor(nBrowserId)) {
+					renderer->editableFocused = bEditable;
+					renderer->composing = false;
 				}
 				if (m_invokeFunc)
 				{
@@ -376,6 +401,44 @@ namespace webview_cef {
                 }
             };
 
+            m_handler->onUnhandledKeyEvent = [=, this](int nBrowserId, int keyCode, int modifiers)
+            {
+                if (m_invokeFunc)
+                {
+                    WValue* retMap = webview_value_new_map();
+                    WValue* bId = webview_value_new_int(nBrowserId);
+                    WValue* k = webview_value_new_int(keyCode);
+                    WValue* m = webview_value_new_int(modifiers);
+                    webview_value_set_string(retMap, "browserId", bId);
+                    webview_value_set_string(retMap, "keyCode", k);
+                    webview_value_set_string(retMap, "modifiers", m);
+                    m_invokeFunc("onUnhandledKey", retMap);
+                    webview_value_unref(bId);
+                    webview_value_unref(k);
+                    webview_value_unref(m);
+                    webview_value_unref(retMap);
+                }
+            };
+
+            m_handler->onNewWindowEvent = [=, this](int nBrowserId, std::string url, int disposition)
+            {
+                if (m_invokeFunc)
+                {
+                    WValue* retMap = webview_value_new_map();
+                    WValue* bId = webview_value_new_int(nBrowserId);
+                    WValue* u = webview_value_new_string(const_cast<char*>(url.c_str()));
+                    WValue* d = webview_value_new_int(disposition);
+                    webview_value_set_string(retMap, "browserId", bId);
+                    webview_value_set_string(retMap, "url", u);
+                    webview_value_set_string(retMap, "disposition", d);
+                    m_invokeFunc("onNewWindow", retMap);
+                    webview_value_unref(bId);
+                    webview_value_unref(u);
+                    webview_value_unref(d);
+                    webview_value_unref(retMap);
+                }
+            };
+
 			{
 				std::lock_guard<std::mutex> lock(devToolsMutex);
 				devToolsSink = [=, this](const std::string& message) {
@@ -394,6 +457,8 @@ namespace webview_cef {
 	void WebviewPlugin::uninitCallback(){
 		m_handler->onPaintCallback = nullptr;
 		m_handler->onAcceleratedPaintCallback = nullptr;
+		m_handler->onAcceleratedPopupCallback = nullptr;
+		m_handler->onPopupHiddenCallback = nullptr;
 		m_handler->onTooltipEvent = nullptr;
 		m_handler->onCursorChangedEvent = nullptr;
 		m_handler->onConsoleMessageEvent = nullptr;
@@ -406,6 +471,8 @@ namespace webview_cef {
 		m_handler->onContextMenuEvent = nullptr;
 		m_handler->onFindResultEvent = nullptr;
 		m_handler->onZoomChangedEvent = nullptr;
+		m_handler->onNewWindowEvent = nullptr;
+		m_handler->onUnhandledKeyEvent = nullptr;
 		{
 			std::lock_guard<std::mutex> lock(devToolsMutex);
 			devToolsSink = nullptr;
@@ -461,7 +528,10 @@ namespace webview_cef {
 			const bool incognito = name.compare("createIncognito") == 0;
 			m_handler->createBrowser(url, [=, this](int browserId) {
 				std::shared_ptr<WebviewTexture> renderer = m_createTextureFunc();
-				m_renderers[browserId] = renderer;
+				{
+					std::lock_guard<std::mutex> lock(m_renderersMutex);
+					m_renderers[browserId] = renderer;
+				}
 				WValue	*response = webview_value_new_list();
 				webview_value_append(response, webview_value_new_int(browserId));
 				webview_value_append(response, webview_value_new_int(renderer->textureId));
@@ -472,8 +542,9 @@ namespace webview_cef {
 		else if (name.compare("close") == 0) {
 			int browserId = int(webview_value_get_int(values));
 			m_handler->closeBrowser(browserId);
-			if(m_renderers.find(browserId) != m_renderers.end() && m_renderers[browserId] != nullptr) {
-				m_renderers[browserId].reset();
+			{
+				std::lock_guard<std::mutex> lock(m_renderersMutex);
+				m_renderers.erase(browserId);
 			}
 			result(1, nullptr);
 		}
@@ -496,16 +567,33 @@ namespace webview_cef {
 		else if (name.compare("cursorClickDown") == 0 
 			|| name.compare("cursorClickUp") == 0 
 			|| name.compare("cursorMove") == 0 
-			|| name.compare("cursorDragging") == 0) {
+			|| name.compare("cursorDragging") == 0
+			|| name.compare("cursorLeave") == 0
+			|| name.compare("cursorCancel") == 0) {
 			result(cursorAction(values, name), nullptr);
+		}
+		else if (name.compare("setVisible") == 0) {
+			int browserId = int(webview_value_get_int(webview_value_get_list_value(values, 0)));
+			bool visible = webview_value_get_bool(webview_value_get_list_value(values, 1));
+			m_handler->setVisible(browserId, visible);
+			result(1, nullptr);
 		}
 		else if (name.compare("setScrollDelta") == 0) {
 			int browserId = int(webview_value_get_int(webview_value_get_list_value(values, 0)));
 			auto x = webview_value_get_int(webview_value_get_list_value(values, 1));
 			auto y = webview_value_get_int(webview_value_get_list_value(values, 2));
-			auto deltaX = webview_value_get_int(webview_value_get_list_value(values, 3));
-			auto deltaY = webview_value_get_int(webview_value_get_list_value(values, 4));
-			m_handler->sendScrollEvent(browserId, (int)x, (int)y, (int)deltaX, (int)deltaY);
+			// 6browser patch: fractional DIP deltas and the modifier keys.
+			auto number = [](WValue* v) {
+				return webview_value_get_type(v) == Webview_Value_Type_Double
+					? webview_value_get_double(v)
+					: static_cast<double>(webview_value_get_int(v));
+			};
+			const double deltaX = number(webview_value_get_list_value(values, 3));
+			const double deltaY = number(webview_value_get_list_value(values, 4));
+			const int modifiers = webview_value_get_len(values) > 5
+				? int(webview_value_get_int(webview_value_get_list_value(values, 5)))
+				: 0;
+			m_handler->sendScrollEvent(browserId, (int)x, (int)y, deltaX, deltaY, modifiers);
 			result(1, nullptr);
 		}
 		else if (name.compare("goForward") == 0) {
@@ -599,15 +687,15 @@ namespace webview_cef {
 		} 
 		else if (name.compare("setClientFocus") == 0) {
 			int browserId = int(webview_value_get_int(webview_value_get_list_value(values, 0)));
-			if (m_renderers.find(browserId) != m_renderers.end() && m_renderers[browserId] != nullptr) {
+			if (auto renderer = rendererFor(browserId)) {
 				bool focused = webview_value_get_bool(webview_value_get_list_value(values, 1));
-				m_renderers[browserId].get()->isFocused = focused;
+				renderer->isFocused = focused;
 				// Losing focus ends any composition: the OS IME drops marked text,
 				// but CEF's SetFocus(false) does not blur the DOM node, so no
 				// FocusedNodeChanged fires to clear it — a stale flag would then
 				// mis-route the first keys after the webview is refocused.
 				if (!focused) {
-					m_renderers[browserId].get()->composing = false;
+					renderer->composing = false;
 				}
 				m_handler->setClientFocus(browserId, focused);
 			}
@@ -801,12 +889,17 @@ namespace webview_cef {
 		m_handler->imeFinishComposition();
 	}
 
+	void WebviewPlugin::imeCancelCompositionNative()
+	{
+		m_handler->imeCancelComposition();
+	}
+
 	void WebviewPlugin::sendKeyEvent(CefKeyEvent& ev)
 	{
 		m_handler->sendKeyEvent(ev);
 		if(ev.type == KEYEVENT_RAWKEYDOWN && ev.windows_key_code == 0x7B && (ev.modifiers & EVENTFLAG_CONTROL_DOWN) != 0){
-			for(auto render : m_renderers){
-				if(render.second.get()->isFocused){
+			for(auto& render : renderersSnapshot()){
+				if(render.second->isFocused){
 					m_handler->openDevTools(render.first);
 				}
 			}
@@ -823,17 +916,12 @@ namespace webview_cef {
 	}
 	
 	bool WebviewPlugin::getAnyBrowserFocused(){
-		for(auto render : m_renderers){
-			if(render.second != nullptr && render.second.get()->isFocused){
-				return true;
-			}
-		}
-		return false;
+		return focusedBrowserId() >= 0;
 	}
 
 	int WebviewPlugin::focusedBrowserId(){
-		for(auto& render : m_renderers){
-			if(render.second != nullptr && render.second->isFocused){
+		for(auto& render : renderersSnapshot()){
+			if(render.second->isFocused){
 				return render.first;
 			}
 		}
@@ -845,8 +933,8 @@ namespace webview_cef {
 		if(id < 0){
 			return false;
 		}
-		auto it = m_renderers.find(id);
-		return it != m_renderers.end() && it->second && it->second->editableFocused;
+		auto renderer = rendererFor(id);
+		return renderer && renderer->editableFocused;
 	}
 
 	bool WebviewPlugin::isComposing(){
@@ -854,14 +942,13 @@ namespace webview_cef {
 		if(id < 0){
 			return false;
 		}
-		auto it = m_renderers.find(id);
-		return it != m_renderers.end() && it->second && it->second->composing;
+		auto renderer = rendererFor(id);
+		return renderer && renderer->composing;
 	}
 
 	void WebviewPlugin::setComposingForBrowser(int browserId, bool composing){
-		auto it = m_renderers.find(browserId);
-		if(it != m_renderers.end() && it->second){
-			it->second->composing = composing;
+		if (auto renderer = rendererFor(browserId)) {
+			renderer->composing = composing;
 		}
 	}
 
@@ -875,26 +962,35 @@ namespace webview_cef {
 		if (!args || webview_value_get_len(args) < 3) {
 			return 0;
 		}
-		int browserId = int(webview_value_get_int(webview_value_get_list_value(args, 0)));
-		int x = int(webview_value_get_int(webview_value_get_list_value(args, 1)));
-		int y = int(webview_value_get_int(webview_value_get_list_value(args, 2)));
-		// 6browser patch: optional mouse button (0 left, 1 middle, 2 right).
-		int button = webview_value_get_len(args) > 3
-			? int(webview_value_get_int(webview_value_get_list_value(args, 3))) : 0;
-		if (!x && !y) {
-			return 0;
-		}
+		auto arg = [args](size_t i, int fallback) {
+			return webview_value_get_len(args) > i
+				? int(webview_value_get_int(webview_value_get_list_value(args, i))) : fallback;
+		};
+		int browserId = arg(0, 0);
+		int x = arg(1, 0);
+		int y = arg(2, 0);
+		// 6browser patch: optional mouse button (0 left, 1 middle, 2 right),
+		// click count and CEF modifier flags.
+		int button = arg(3, 0);
+		int clickCount = arg(4, 1);
+		int modifiers = arg(5, 0);
 		if (name.compare("cursorClickDown") == 0) {
-			m_handler->cursorClick(browserId, x, y, false, button);
+			m_handler->cursorClick(browserId, x, y, false, button, clickCount, modifiers);
 		}
 		else if (name.compare("cursorClickUp") == 0) {
-			m_handler->cursorClick(browserId, x, y, true, button);
+			m_handler->cursorClick(browserId, x, y, true, button, clickCount, modifiers);
 		}
 		else if (name.compare("cursorMove") == 0) {
-			m_handler->cursorMove(browserId, x, y, false);
+			m_handler->cursorMove(browserId, x, y, false, modifiers);
 		}
 		else if (name.compare("cursorDragging") == 0) {
-			m_handler->cursorMove(browserId, x, y, true);
+			m_handler->cursorMove(browserId, x, y, true, modifiers);
+		}
+		else if (name.compare("cursorLeave") == 0) {
+			m_handler->cursorLeave(browserId, x, y);
+		}
+		else if (name.compare("cursorCancel") == 0) {
+			m_handler->cursorCancel(browserId, x, y, button);
 		}
 		return 1;
 	}

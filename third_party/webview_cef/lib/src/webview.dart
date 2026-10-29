@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -97,6 +98,19 @@ class WebViewController extends ValueNotifier<bool> {
     return _creatingCompleter.future;
   }
 
+  /// 6browser patch: calls made while the browser is still being created
+  /// (a click on the New Tab page at startup) wait for it instead of failing.
+  Future<bool> _whenReady() async {
+    if (!value) {
+      try {
+        await ready;
+      } catch (_) {
+        return false;
+      }
+    }
+    return !_isDisposed;
+  }
+
   setWebviewListener(WebviewEventsListener listener) {
     _listener = listener;
   }
@@ -117,7 +131,7 @@ class WebViewController extends ValueNotifier<bool> {
     if (_isDisposed) {
       return;
     }
-    assert(value);
+    if (!await _whenReady()) return;
     return _pluginChannel.invokeMethod('loadUrl', [_browserId, url]);
   }
 
@@ -127,7 +141,7 @@ class WebViewController extends ValueNotifier<bool> {
     if (_isDisposed) {
       return;
     }
-    assert(value);
+    if (!await _whenReady()) return;
     return _pluginChannel.invokeMethod('editCommand', [_browserId, command]);
   }
 
@@ -136,7 +150,7 @@ class WebViewController extends ValueNotifier<bool> {
     if (_isDisposed) {
       return;
     }
-    assert(value);
+    if (!await _whenReady()) return;
     return _pluginChannel.invokeMethod('startDownload', [_browserId, url]);
   }
 
@@ -146,7 +160,7 @@ class WebViewController extends ValueNotifier<bool> {
     if (_isDisposed) {
       return;
     }
-    assert(value);
+    if (!await _whenReady()) return;
     return _pluginChannel.invokeMethod('inspectElementAt',
         [_browserId, pagePosition.dx.round(), pagePosition.dy.round()]);
   }
@@ -159,6 +173,18 @@ class WebViewController extends ValueNotifier<bool> {
   }
 
   Future<void> stopLoad() => _call('stopLoad', _browserId);
+
+  /// 6browser patch: a hidden (background) tab stops rendering and its
+  /// timers slow down, as in Chrome. Applied once the browser exists.
+  Future<void> setVisible(bool visible) async {
+    if (_visible == visible) return;
+    _visible = visible;
+    if (!await _whenReady()) return;
+    if (_visible != visible) return; // changed again meanwhile
+    return _pluginChannel.invokeMethod('setVisible', [_browserId, visible]);
+  }
+
+  bool _visible = true;
   Future<void> reloadIgnoreCache() => _call('reloadIgnoreCache', _browserId);
   Future<void> printPage() => _call('print', _browserId);
 
@@ -169,15 +195,17 @@ class WebViewController extends ValueNotifier<bool> {
   /// Searches the page; results arrive through
   /// [WebviewEventsListener.onFindResult].
   Future<void> find(String text,
-          {bool forward = true, bool matchCase = false, bool findNext = false}) =>
+          {bool forward = true,
+          bool matchCase = false,
+          bool findNext = false}) =>
       _call('find', [_browserId, text, forward, matchCase, findNext]);
   Future<void> stopFinding({bool clearSelection = true}) =>
       _call('stopFinding', [_browserId, clearSelection]);
 
   /// Called by [WebviewManager] when the page asks for a context menu.
   void handleContextMenu(Map<String, dynamic> args) {
-    final page = Offset(
-        (args['x'] as int).toDouble(), (args['y'] as int).toDouble());
+    final page =
+        Offset((args['x'] as int).toDouble(), (args['y'] as int).toDouble());
     _listener?.onContextMenu?.call(WebviewContextMenu(
       position: _localToGlobal?.call(page) ?? page,
       pagePosition: page,
@@ -196,12 +224,17 @@ class WebViewController extends ValueNotifier<bool> {
   /// Set by [WebViewState]: maps page coordinates to global ones.
   Offset Function(Offset local)? _localToGlobal;
 
+  /// 6browser patch: gives the page the keyboard focus (after a tab switch
+  /// or navigating from the address bar).
+  void requestFocus() => _requestFocus?.call();
+  VoidCallback? _requestFocus;
+
   /// Reloads the current document.
   Future<void> reload() async {
     if (_isDisposed) {
       return;
     }
-    assert(value);
+    if (!await _whenReady()) return;
     return _pluginChannel.invokeMethod('reload', _browserId);
   }
 
@@ -209,7 +242,7 @@ class WebViewController extends ValueNotifier<bool> {
     if (_isDisposed) {
       return;
     }
-    assert(value);
+    if (!await _whenReady()) return;
     return _pluginChannel.invokeMethod('goForward', _browserId);
   }
 
@@ -217,7 +250,7 @@ class WebViewController extends ValueNotifier<bool> {
     if (_isDisposed) {
       return;
     }
-    assert(value);
+    if (!await _whenReady()) return;
     return _pluginChannel.invokeMethod('goBack', _browserId);
   }
 
@@ -225,7 +258,7 @@ class WebViewController extends ValueNotifier<bool> {
     if (_isDisposed) {
       return;
     }
-    assert(value);
+    if (!await _whenReady()) return;
     return _pluginChannel.invokeMethod('openDevTools', _browserId);
   }
 
@@ -233,7 +266,7 @@ class WebViewController extends ValueNotifier<bool> {
     if (_isDisposed) {
       return;
     }
-    assert(value);
+    if (!await _whenReady()) return;
     return _pluginChannel
         .invokeMethod('imeSetComposition', [_browserId, composingText]);
   }
@@ -242,7 +275,7 @@ class WebViewController extends ValueNotifier<bool> {
     if (_isDisposed) {
       return;
     }
-    assert(value);
+    if (!await _whenReady()) return;
     return _pluginChannel
         .invokeMethod('imeCommitText', [_browserId, composingText]);
   }
@@ -251,7 +284,7 @@ class WebViewController extends ValueNotifier<bool> {
     if (_isDisposed) {
       return;
     }
-    assert(value);
+    if (!await _whenReady()) return;
     return _pluginChannel.invokeMethod('setClientFocus', [_browserId, focus]);
   }
 
@@ -261,22 +294,16 @@ class WebViewController extends ValueNotifier<bool> {
     if (_isDisposed) {
       return;
     }
-    assert(value);
-    return _pluginChannel.invokeMethod('sendKeyEvent', [
-      _browserId,
-      type,
-      keyCode,
-      modifiers,
-      character,
-      unmodifiedCharacter
-    ]);
+    if (!await _whenReady()) return;
+    return _pluginChannel.invokeMethod('sendKeyEvent',
+        [_browserId, type, keyCode, modifiers, character, unmodifiedCharacter]);
   }
 
   Future<void> setJavaScriptChannels(Set<JavascriptChannel> channels) async {
     if (_isDisposed) {
       return;
     }
-    assert(value);
+    if (!await _whenReady()) return;
     _assertJavascriptChannelNamesAreUnique(channels);
 
     for (var channel in channels) {
@@ -292,7 +319,7 @@ class WebViewController extends ValueNotifier<bool> {
     if (_isDisposed) {
       return;
     }
-    assert(value);
+    if (!await _whenReady()) return;
     return _pluginChannel.invokeMethod('sendJavaScriptChannelCallBack',
         [error, result, callbackId, _browserId, frameId]);
   }
@@ -301,7 +328,7 @@ class WebViewController extends ValueNotifier<bool> {
     if (_isDisposed) {
       return;
     }
-    assert(value);
+    if (!await _whenReady()) return;
     return _pluginChannel.invokeMethod('executeJavaScript', [_browserId, code]);
   }
 
@@ -309,65 +336,75 @@ class WebViewController extends ValueNotifier<bool> {
     if (_isDisposed) {
       return;
     }
-    assert(value);
+    if (!await _whenReady()) return;
     return _pluginChannel
         .invokeMethod('evaluateJavascript', [_browserId, code]);
   }
 
   /// Moves the virtual cursor to [position].
-  Future<void> _cursorMove(Offset position) async {
-    if (_isDisposed) {
+  Future<void> _cursorMove(Offset position, [int modifiers = 0]) =>
+      _cursor('cursorMove', position, 0, 1, modifiers);
+
+  Future<void> _cursorDragging(Offset position, [int modifiers = 0]) =>
+      _cursor('cursorDragging', position, 0, 1, modifiers);
+
+  // 6browser patch: [button] is 0 left, 1 middle, 2 right; [clickCount] is 2
+  // for a double-click; [modifiers] are CEF event flags.
+  Future<void> _cursorClickDown(Offset position,
+          [int button = 0, int clickCount = 1, int modifiers = 0]) =>
+      _cursor('cursorClickDown', position, button, clickCount, modifiers);
+
+  Future<void> _cursorClickUp(Offset position,
+          [int button = 0, int clickCount = 1, int modifiers = 0]) =>
+      _cursor('cursorClickUp', position, button, clickCount, modifiers);
+
+  /// The pointer left the view.
+  Future<void> _cursorLeave(Offset position) =>
+      _cursor('cursorLeave', position, 0, 1, 0);
+
+  Future<void> _cursor(String method, Offset position, int button,
+      int clickCount, int modifiers) async {
+    if (_isDisposed || !value) {
       return;
     }
-    assert(value);
-    return _pluginChannel.invokeMethod(
-        'cursorMove', [_browserId, position.dx.round(), position.dy.round()]);
+    return _pluginChannel.invokeMethod(method, [
+      _browserId,
+      position.dx.round(),
+      position.dy.round(),
+      button,
+      clickCount,
+      modifiers,
+    ]);
   }
 
-  Future<void> _cursorDragging(Offset position) async {
-    if (_isDisposed) {
+  /// 6browser patch: scrolls by [delta] logical pixels (positive scrolls
+  /// right/down) at [position]; [modifiers] are CEF event flags.
+  Future<void> _scrollBy(Offset position, Offset delta, int modifiers) async {
+    if (_isDisposed || !value || delta == Offset.zero) {
       return;
     }
-    assert(value);
-    return _pluginChannel.invokeMethod('cursorDragging',
-        [_browserId, position.dx.round(), position.dy.round()]);
+    return _pluginChannel.invokeMethod('setScrollDelta', [
+      _browserId,
+      position.dx.round(),
+      position.dy.round(),
+      delta.dx,
+      delta.dy,
+      modifiers,
+    ]);
   }
 
-  // 6browser patch: [button] is 0 left, 1 middle, 2 right.
-  Future<void> _cursorClickDown(Offset position, [int button = 0]) async {
-    if (_isDisposed) {
-      return;
-    }
-    assert(value);
-    return _pluginChannel.invokeMethod('cursorClickDown',
-        [_browserId, position.dx.round(), position.dy.round(), button]);
-  }
-
-  Future<void> _cursorClickUp(Offset position, [int button = 0]) async {
-    if (_isDisposed) {
-      return;
-    }
-    assert(value);
-    return _pluginChannel.invokeMethod('cursorClickUp',
-        [_browserId, position.dx.round(), position.dy.round(), button]);
-  }
-
-  /// Sets the horizontal and vertical scroll delta.
-  Future<void> _setScrollDelta(Offset position, int dx, int dy) async {
-    if (_isDisposed) {
-      return;
-    }
-    assert(value);
-    return _pluginChannel.invokeMethod('setScrollDelta',
-        [_browserId, position.dx.round(), position.dy.round(), dx, dy]);
-  }
+  /// 6browser patch: releases a press that Flutter cancelled (a route opened
+  /// or the window lost the pointer), so the page is not left thinking a
+  /// button is still down.
+  Future<void> _cursorCancel(Offset position, int button) =>
+      _cursor('cursorCancel', position, button, 1, 0);
 
   /// Sets the surface size to the provided [size].
   Future<void> _setSize(double dpi, Size size) async {
     if (_isDisposed) {
       return;
     }
-    assert(value);
+    if (!await _whenReady()) return;
     return _pluginChannel
         .invokeMethod('setSize', [_browserId, dpi, size.width, size.height]);
   }
@@ -416,11 +453,39 @@ class WebViewState extends State<WebView> with WebeViewTextInput {
   // release (whose `buttons` is already 0) goes to the same button.
   int _pressedButton = 0;
 
+  // 6browser patch: double and triple clicks (select a word / a paragraph).
+  int _clickCount = 1;
+  Duration? _lastDownTime;
+  Offset _lastDownPosition = Offset.zero;
+  int _lastDownButton = -1;
+
+  int _countClick(PointerDownEvent ev, int button) {
+    final last = _lastDownTime;
+    final repeat = last != null &&
+        button == _lastDownButton &&
+        ev.timeStamp - last <= const Duration(milliseconds: 500) &&
+        (ev.localPosition - _lastDownPosition).distance <= 4;
+    _clickCount = repeat ? _clickCount % 3 + 1 : 1;
+    _lastDownTime = ev.timeStamp;
+    _lastDownPosition = ev.localPosition;
+    _lastDownButton = button;
+    return _clickCount;
+  }
+
   static int _cefButton(int buttons) => (buttons & kSecondaryMouseButton) != 0
       ? 2
       : (buttons & kMiddleMouseButton) != 0
           ? 1
           : 0;
+
+  /// CEF flags for the modifier keys held now.
+  static int _modifiers() {
+    final keys = HardwareKeyboard.instance;
+    return (keys.isShiftPressed ? eventFlagShiftDown : 0) |
+        (keys.isControlPressed ? eventFlagControlDown : 0) |
+        (keys.isAltPressed ? eventFlagAltDown : 0) |
+        (keys.isMetaPressed ? eventFlagCommandDown : 0);
+  }
 
   Offset _pageToGlobal(Offset local) {
     final box = _key.currentContext?.findRenderObject() as RenderBox?;
@@ -471,6 +536,7 @@ class WebViewState extends State<WebView> with WebeViewTextInput {
   @override
   void initState() {
     super.initState();
+    _controller._requestFocus = _focusPage;
     _controller._onFocusedNodeChangeMessage = (editable) {
       _composingText = '';
       editable ? attachTextInputClient() : detachTextInputClient();
@@ -522,6 +588,38 @@ class WebViewState extends State<WebView> with WebeViewTextInput {
         .addPostFrameCallback((_) => _reportSurfaceSize(context));
   }
 
+  void _focusPage() {
+    if (mounted) _focusNode.requestFocus();
+  }
+
+  double? _pixelRatio;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 6browser patch: moving to a monitor with another scale keeps the
+    // logical size, so no size notification comes; the page must still
+    // re-render at the new scale.
+    final ratio = MediaQuery.devicePixelRatioOf(context);
+    if (_pixelRatio != null && ratio != _pixelRatio) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _reportSurfaceSize(context);
+      });
+    }
+    _pixelRatio = ratio;
+  }
+
+  @override
+  void dispose() {
+    // 6browser patch: a tooltip shown over a closed tab stayed forever.
+    _tooltip?.hide();
+    if (_controller._requestFocus == _focusPage) {
+      _controller._requestFocus = null;
+    }
+    _focusNode.dispose();
+    super.dispose();
+  }
+
   KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
     // Only handle keys on platforms without native key support (eLinux)
     // Treat null as "don't handle yet" to prevent double-delivery during async gap
@@ -532,10 +630,10 @@ class WebViewState extends State<WebView> with WebeViewTextInput {
     // Map Flutter key event to CEF key event
     final logicalKey = event.logicalKey;
     final character = event.character;
-    
+
     // Convert logical key to Windows keycode
     int keyCode = _logicalKeyToWindowsKeyCode(logicalKey);
-    
+
     // Build modifiers
     int modifiers = 0;
     if (HardwareKeyboard.instance.isShiftPressed) {
@@ -547,7 +645,7 @@ class WebViewState extends State<WebView> with WebeViewTextInput {
     if (HardwareKeyboard.instance.isAltPressed) {
       modifiers |= eventFlagAltDown;
     }
-    
+
     // Determine event type
     int type;
     if (event is KeyDownEvent) {
@@ -557,7 +655,7 @@ class WebViewState extends State<WebView> with WebeViewTextInput {
     } else {
       return KeyEventResult.ignored;
     }
-    
+
     // Send key event to CEF
     _controller.sendKeyEvent(
       type,
@@ -566,7 +664,7 @@ class WebViewState extends State<WebView> with WebeViewTextInput {
       character?.codeUnitAt(0) ?? 0,
       character?.codeUnitAt(0) ?? 0,
     );
-    
+
     // Send CHAR event after RAWKEYDOWN when character is present (required for text entry)
     if (event is KeyDownEvent && character != null) {
       _controller.sendKeyEvent(
@@ -609,7 +707,7 @@ class WebViewState extends State<WebView> with WebeViewTextInput {
     if (key == LogicalKeyboardKey.arrowDown) return 0x28;
     if (key == LogicalKeyboardKey.arrowLeft) return 0x25;
     if (key == LogicalKeyboardKey.arrowRight) return 0x27;
-    
+
     // For alphanumeric keys, use the key label
     final keyLabel = key.keyLabel;
     if (keyLabel.length == 1) {
@@ -623,35 +721,62 @@ class WebViewState extends State<WebView> with WebeViewTextInput {
         return charCode;
       }
     }
-    
+
     // Default fallback
     return 0;
   }
 
+  // 6browser patch: keys the page itself uses. Without this, Flutter's
+  // default shortcuts acted on them too while the page had focus: Tab and
+  // the arrows moved focus out of the page (to the toolbar), PageUp/PageDown
+  // scrolled an enclosing scrollable.
+  static final _pageKeys = <ShortcutActivator, Intent>{
+    for (final key in [
+      LogicalKeyboardKey.tab,
+      LogicalKeyboardKey.arrowUp,
+      LogicalKeyboardKey.arrowDown,
+      LogicalKeyboardKey.arrowLeft,
+      LogicalKeyboardKey.arrowRight,
+      LogicalKeyboardKey.pageUp,
+      LogicalKeyboardKey.pageDown,
+      LogicalKeyboardKey.home,
+      LogicalKeyboardKey.end,
+      LogicalKeyboardKey.space,
+      LogicalKeyboardKey.enter,
+      LogicalKeyboardKey.numpadEnter,
+    ]) ...{
+      SingleActivator(key): const DoNothingAndStopPropagationIntent(),
+      SingleActivator(key, shift: true):
+          const DoNothingAndStopPropagationIntent(),
+    },
+  };
+
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      autofocus: true,
-      focusNode: _focusNode,
-      canRequestFocus: true,
-      debugLabel: "webview_cef",
-      onFocusChange: (focused) {
-        _composingText = '';
-        if (focused) {
-          _controller.setClientFocus(true);
-          if (_controller._focusEditable) {
-            attachTextInputClient();
-          }
-        } else {
-          _controller.setClientFocus(false);
-          if (_controller._focusEditable) {
-            detachTextInputClient();
-          }
-        }
-      },
-      onKeyEvent: _onKeyEvent,
-      child: SizedBox.expand(key: _key, child: _buildInner()),
-    );
+    return Shortcuts(
+        shortcuts: _pageKeys,
+        child: Focus(
+          autofocus: true,
+          focusNode: _focusNode,
+          canRequestFocus: true,
+          debugLabel: "webview_cef",
+          onFocusChange: (focused) {
+            _composingText = '';
+            if (focused) {
+              _controller.setClientFocus(true);
+              if (_controller._focusEditable) {
+                attachTextInputClient();
+              }
+            } else {
+              _controller.setClientFocus(false);
+              if (_controller._focusEditable) {
+                detachTextInputClient();
+              }
+            }
+          },
+          onKeyEvent: _onKeyEvent,
+          child: SizedBox.expand(key: _key, child: _buildInner()),
+        ));
   }
 
   Widget _buildInner() {
@@ -663,7 +788,7 @@ class WebViewState extends State<WebView> with WebeViewTextInput {
       child: SizeChangedLayoutNotifier(
         child: Listener(
           onPointerHover: (ev) {
-            _controller._cursorMove(ev.localPosition);
+            _controller._cursorMove(ev.localPosition, _modifiers());
             _tooltip?.cursorOffset = ev.position;
           },
           onPointerDown: (ev) {
@@ -671,39 +796,65 @@ class WebViewState extends State<WebView> with WebeViewTextInput {
               _controller._onImeCompositionRangeChangedMessage?.call(0, 0, 0);
               _focusNode.requestFocus();
               Future.delayed(const Duration(milliseconds: 50), () {
-                if (!_focusNode.hasFocus) {
+                if (mounted && !_focusNode.hasFocus) {
                   _focusNode.requestFocus();
                 }
               });
             }
             _pressedButton = _cefButton(ev.buttons);
             _controller._localToGlobal = _pageToGlobal;
-            _controller._cursorClickDown(ev.localPosition, _pressedButton);
+            _controller._cursorClickDown(ev.localPosition, _pressedButton,
+                _countClick(ev, _pressedButton), _modifiers());
           },
           onPointerUp: (ev) {
-            _controller._cursorClickUp(ev.localPosition, _pressedButton);
+            _controller._cursorClickUp(
+                ev.localPosition, _pressedButton, _clickCount, _modifiers());
+            _pressedButton = 0;
+          },
+          onPointerCancel: (ev) {
+            _controller._cursorCancel(ev.localPosition, _pressedButton);
             _pressedButton = 0;
           },
           onPointerMove: (ev) {
             // Only a left-button drag selects text or drags content.
             if (_pressedButton == 0) {
-              _controller._cursorDragging(ev.localPosition);
+              _controller._cursorDragging(ev.localPosition, _modifiers());
             } else {
-              _controller._cursorMove(ev.localPosition);
+              _controller._cursorMove(ev.localPosition, _modifiers());
             }
           },
           onPointerSignal: (signal) {
-            if (signal is PointerScrollEvent) {
-              _controller._setScrollDelta(signal.localPosition,
-                  signal.scrollDelta.dx.round(), signal.scrollDelta.dy.round());
-            }
+            if (signal is! PointerScrollEvent) return;
+            // Claim the wheel so no enclosing scrollable also moves.
+            GestureBinding.instance.pointerSignalResolver.register(signal,
+                (event) {
+              final scroll = event as PointerScrollEvent;
+              // Flutter divides the platform's wheel distance by the pixel
+              // ratio; the page scrolls by the platform's distance, as in
+              // Chrome.
+              var delta =
+                  scroll.scrollDelta * MediaQuery.devicePixelRatioOf(context);
+              // Shift+wheel scrolls sideways (macOS swaps the axes itself).
+              if (delta.dx == 0 &&
+                  HardwareKeyboard.instance.isShiftPressed &&
+                  defaultTargetPlatform != TargetPlatform.macOS) {
+                delta = Offset(delta.dy, 0);
+              }
+              _controller._scrollBy(scroll.localPosition, delta, _modifiers());
+            });
           },
           onPointerPanZoomUpdate: (event) {
-            _controller._setScrollDelta(event.localPosition,
-                event.panDelta.dx.round(), event.panDelta.dy.round());
+            // Trackpad: the content follows the fingers.
+            _controller._scrollBy(
+                event.localPosition, -event.localPanDelta, _modifiers());
           },
           child: MouseRegion(
             cursor: _mouseType,
+            // Ends hover effects and tooltips on the page, as in Chrome.
+            onExit: (ev) {
+              _controller._cursorLeave(ev.localPosition);
+              _tooltip?.hide();
+            },
             child: Texture(textureId: _controller._textureId),
           ),
         ),

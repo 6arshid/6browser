@@ -32,10 +32,18 @@ namespace webview_cef {
         bool isValid() const { return device_ && textureId != 0; }
 
         void onAcceleratedFrame(const void* sharedHandle, int width, int height, int format) override;
+        void onAcceleratedPopup(const void* sharedHandle, int x, int y) override;
+        void hidePopup() override;
 
     private:
         const FlutterDesktopGpuSurfaceDescriptor* ObtainDescriptor(size_t width, size_t height);
         bool EnsureBridgeTexture(UINT width, UINT height, DXGI_FORMAT format);
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> OpenCefTexture(const void* sharedHandle);
+        static bool EnsureCopy(ID3D11Device* device, Microsoft::WRL::ComPtr<ID3D11Texture2D>& tex,
+                               const D3D11_TEXTURE2D_DESC& like);
+        // Draws |popup_tex_| over the bridge texture (which holds the page).
+        void CompositePopup();
+        void FrameAvailable();
 
         FlutterDesktopTextureRegistrarRef registrar_ = nullptr;
         Microsoft::WRL::ComPtr<ID3D11Device1> device_;
@@ -48,6 +56,13 @@ namespace webview_cef {
         UINT tex_height_ = 0;
         DXGI_FORMAT tex_format_ = DXGI_FORMAT_B8G8R8A8_UNORM;
         FlutterDesktopPixelFormat flutter_format_ = kFlutterDesktopPixelFormatBGRA8888;
+        // While a popup is open: the page without it, and the popup itself.
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> page_tex_;
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> popup_tex_;
+        bool page_saved_ = false;
+        bool popup_shown_ = false;
+        int popup_x_ = 0;
+        int popup_y_ = 0;
         std::mutex mutex_;
     };
 }

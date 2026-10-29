@@ -17,6 +17,29 @@ void main() {
         'https://www.google.com/search?q=flutter+cef',
       );
     });
+    test('international, IP and intranet hosts', () {
+      expect(resolveInput('ایران.ir'), 'http://ایران.ir');
+      expect(resolveInput('münchen.de/a'), 'http://münchen.de/a');
+      expect(resolveInput('192.168.1.1:8080'), 'http://192.168.1.1:8080');
+      expect(resolveInput('[::1]:8080/x'), 'http://[::1]:8080/x');
+      expect(resolveInput('nas:5000'), 'http://nas:5000');
+      expect(resolveInput('router/admin'), 'http://router/admin');
+      expect(resolveInput('localhost'), 'http://localhost');
+      expect(resolveInput('example.com/index.html'), startsWith('http://'));
+    });
+    test('bare schemes and Windows paths', () {
+      expect(
+        resolveInput('view-source:https://a.com/'),
+        'view-source:https://a.com/',
+      );
+      expect(resolveInput('mailto:a@b.com'), 'mailto:a@b.com');
+      expect(resolveInput(r'C:\x\a b.html'), 'file:///C:/x/a%20b.html');
+    });
+    test('file names, numbers and words are searches', () {
+      for (final q in ['node.js', 'index.html', 'v2.0', '1.5', 'router']) {
+        expect(resolveInput(q), startsWith('https://www.google.com/search'));
+      }
+    });
     test('empty input is about:blank', () {
       expect(resolveInput('  '), 'about:blank');
     });

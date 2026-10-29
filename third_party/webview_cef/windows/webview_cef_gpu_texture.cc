@@ -2,6 +2,7 @@
 
 #include <flutter_windows.h>
 
+#include <algorithm>
 #include <iostream>
 
 namespace webview_cef {
@@ -71,9 +72,18 @@ namespace webview_cef {
     }
 
     WebviewGpuTextureRenderer::~WebviewGpuTextureRenderer() {
-        std::lock_guard<std::mutex> lock(mutex_);
         if (registrar_ && textureId) {
-            FlutterDesktopTextureRegistrarUnregisterExternalTexture(registrar_, textureId, nullptr, nullptr);
+            // 6browser patch: Flutter's raster thread may still be drawing this
+            // texture (ObtainDescriptor gets |this|); wait until it lets go
+            // before freeing. Not under |mutex_|, which that call takes.
+            HANDLE done = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            void (*signal)(void*) = [](void* event) { SetEvent(static_cast<HANDLE>(event)); };
+            FlutterDesktopTextureRegistrarUnregisterExternalTexture(
+                registrar_, textureId, done ? signal : nullptr, done);
+            // On a timeout the callback may still come later: keep the event.
+            if (done && WaitForSingleObject(done, 1000) == WAIT_OBJECT_0) {
+                CloseHandle(done);
+            }
         }
     }
 
@@ -113,18 +123,44 @@ namespace webview_cef {
         return true;
     }
 
-    void WebviewGpuTextureRenderer::onAcceleratedFrame(const void* sharedHandle, int width, int height, int format) {
-        if (!device_ || sharedHandle == nullptr) {
-            return;
-        }
-        std::lock_guard<std::mutex> lock(mutex_);
-
+    ComPtr<ID3D11Texture2D> WebviewGpuTextureRenderer::OpenCefTexture(const void* sharedHandle) {
         // CEF's shared texture is pool-owned and only valid during this call, so
         // reopen it on our device every frame (NT handle -> OpenSharedResource1).
-        ComPtr<ID3D11Texture2D> cef_tex;
-        HRESULT hr = device_->OpenSharedResource1(
-            reinterpret_cast<HANDLE>(const_cast<void*>(sharedHandle)), IID_PPV_ARGS(&cef_tex));
-        if (FAILED(hr) || !cef_tex) {
+        ComPtr<ID3D11Texture2D> tex;
+        if (!device_ || sharedHandle == nullptr) return tex;
+        if (FAILED(device_->OpenSharedResource1(
+                reinterpret_cast<HANDLE>(const_cast<void*>(sharedHandle)), IID_PPV_ARGS(&tex)))) {
+            tex.Reset();
+        }
+        return tex;
+    }
+
+    bool WebviewGpuTextureRenderer::EnsureCopy(ID3D11Device* device, ComPtr<ID3D11Texture2D>& tex,
+                                               const D3D11_TEXTURE2D_DESC& like) {
+        if (tex) {
+            D3D11_TEXTURE2D_DESC have = {};
+            tex->GetDesc(&have);
+            if (have.Width == like.Width && have.Height == like.Height && have.Format == like.Format) {
+                return true;
+            }
+            tex.Reset();
+        }
+        D3D11_TEXTURE2D_DESC desc = {};
+        desc.Width = like.Width;
+        desc.Height = like.Height;
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.Format = like.Format;
+        desc.SampleDesc.Count = 1;
+        desc.Usage = D3D11_USAGE_DEFAULT;
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        return SUCCEEDED(device->CreateTexture2D(&desc, nullptr, &tex));
+    }
+
+    void WebviewGpuTextureRenderer::onAcceleratedFrame(const void* sharedHandle, int width, int height, int format) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ComPtr<ID3D11Texture2D> cef_tex = OpenCefTexture(sharedHandle);
+        if (!cef_tex) {
             return;
         }
 
@@ -135,8 +171,80 @@ namespace webview_cef {
         }
 
         context_->CopyResource(bridge_tex_.Get(), cef_tex.Get());
-        context_->Flush();
+        if (popup_shown_) {
+            // Keep the bare page so the popup can be redrawn or removed later.
+            page_saved_ = EnsureCopy(device_.Get(), page_tex_, src_desc);
+            if (page_saved_) context_->CopyResource(page_tex_.Get(), cef_tex.Get());
+            CompositePopup();
+        }
+        FrameAvailable();
+    }
 
+    // 6browser patch: CEF paints popup widgets (<select> dropdowns, date
+    // pickers) separately; they used to replace the whole page texture.
+    void WebviewGpuTextureRenderer::onAcceleratedPopup(const void* sharedHandle, int x, int y) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ComPtr<ID3D11Texture2D> cef_tex = OpenCefTexture(sharedHandle);
+        if (!cef_tex || !bridge_tex_) {
+            return;
+        }
+        D3D11_TEXTURE2D_DESC desc = {};
+        cef_tex->GetDesc(&desc);
+        if (desc.Format != tex_format_ || !EnsureCopy(device_.Get(), popup_tex_, desc)) {
+            return;
+        }
+        context_->CopyResource(popup_tex_.Get(), cef_tex.Get());
+        if (!page_saved_) {
+            // The bridge still holds the bare page: keep it before drawing over.
+            D3D11_TEXTURE2D_DESC page = {};
+            bridge_tex_->GetDesc(&page);
+            page_saved_ = EnsureCopy(device_.Get(), page_tex_, page);
+            if (!page_saved_) return;
+            context_->CopyResource(page_tex_.Get(), bridge_tex_.Get());
+        } else {
+            context_->CopyResource(bridge_tex_.Get(), page_tex_.Get());
+        }
+        popup_shown_ = true;
+        popup_x_ = x;
+        popup_y_ = y;
+        CompositePopup();
+        FrameAvailable();
+    }
+
+    void WebviewGpuTextureRenderer::hidePopup() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (popup_shown_ && page_saved_ && bridge_tex_) {
+            context_->CopyResource(bridge_tex_.Get(), page_tex_.Get());
+            FrameAvailable();
+        }
+        popup_shown_ = false;
+        page_saved_ = false;
+        popup_tex_.Reset();
+        page_tex_.Reset();
+    }
+
+    void WebviewGpuTextureRenderer::CompositePopup() {
+        if (!popup_tex_ || !bridge_tex_) return;
+        D3D11_TEXTURE2D_DESC desc = {};
+        popup_tex_->GetDesc(&desc);
+        // Clip to the page.
+        const int left = (std::max)(popup_x_, 0);
+        const int top = (std::max)(popup_y_, 0);
+        const int right = (std::min)(popup_x_ + static_cast<int>(desc.Width), static_cast<int>(tex_width_));
+        const int bottom = (std::min)(popup_y_ + static_cast<int>(desc.Height), static_cast<int>(tex_height_));
+        if (right <= left || bottom <= top) return;
+        D3D11_BOX box = {};
+        box.left = static_cast<UINT>(left - popup_x_);
+        box.top = static_cast<UINT>(top - popup_y_);
+        box.right = static_cast<UINT>(right - popup_x_);
+        box.bottom = static_cast<UINT>(bottom - popup_y_);
+        box.front = 0;
+        box.back = 1;
+        context_->CopySubresourceRegion(bridge_tex_.Get(), 0, left, top, 0, popup_tex_.Get(), 0, &box);
+    }
+
+    void WebviewGpuTextureRenderer::FrameAvailable() {
+        context_->Flush();
         if (registrar_ && textureId) {
             FlutterDesktopTextureRegistrarMarkExternalTextureFrameAvailable(registrar_, textureId);
         }

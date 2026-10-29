@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' show AppExitType;
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -66,6 +67,32 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
         ?.instance
         ?.requests
         .listen(_onHandOver);
+    // The keyboard follows the selected tab: the address bar on a New Tab
+    // page (Ctrl+T, then type), the page otherwise.
+    ref.listenManual(tabsProvider.select((s) => s.active?.view), (_, view) {
+      if (view == null) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !identical(ref.read(tabsProvider).active?.view, view)) {
+          return;
+        }
+        // Not on phones, where it would open the on-screen keyboard.
+        final desktop =
+            MediaQuery.sizeOf(context).width >= compactBreakpoint &&
+            defaultTargetPlatform != TargetPlatform.android &&
+            defaultTargetPlatform != TargetPlatform.iOS;
+        if (!isNewTabUrl(view.url.value)) {
+          view.focus();
+        } else if (desktop) {
+          _addressFocus.requestFocus();
+        }
+      });
+    });
+    // Only the selected tab renders; the others are hidden, as in Chrome.
+    ref.listenManual(tabsProvider, (_, next) {
+      for (final t in next.tabs) {
+        t.view.setVisible(t.id == next.activeId);
+      }
+    }, fireImmediately: true);
     // With several profiles, the title tells the windows apart.
     ref.listenManual(profileListProvider, (_, next) {
       final list = next.value;
@@ -115,6 +142,7 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
     if (view == null) return;
     view.stopFinding();
     setState(() => _findView = null);
+    view.focus();
   }
 
   void _findStep(BrowserView view, {required bool forward}) {
@@ -123,6 +151,40 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
       return;
     }
     view.find(_findText.text, forward: forward, findNext: true);
+  }
+
+  /// True while a page (not the address bar or another field) has the
+  /// keyboard focus.
+  bool _pageHasFocus() {
+    final view = ref.read(tabsProvider).active?.view;
+    final focused = FocusManager.instance.primaryFocus?.context;
+    if (view == null || focused == null) return false;
+    var inPage = identical(focused.widget, view.widget);
+    if (inPage) return true;
+    focused.visitAncestorElements((e) {
+      inPage = identical(e.widget, view.widget);
+      return !inPage;
+    });
+    return inPage;
+  }
+
+  /// A shortcut pressed in Flutter. While a page has focus it sees the key
+  /// first and only the shortcuts it leaves alone run (see [_onPageKey]),
+  /// as in Chrome; tab and window shortcuts always run.
+  void _runKey(BrowserCommand command) {
+    if (!reservedCommands.contains(command) && _pageHasFocus()) return;
+    _run(command);
+  }
+
+  void _onPageKey(PageKey key) {
+    final command = commandForPageKey(
+      key.keyCode,
+      control: key.control,
+      shift: key.shift,
+      alt: key.alt,
+      meta: key.meta,
+    );
+    if (command != null && !reservedCommands.contains(command)) _run(command);
   }
 
   void _snack(String text) =>
@@ -263,12 +325,15 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
     if (_findView != null && !identical(_findView, view)) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _closeFind());
     }
-    final colors = BrowserColors.of(context);
+    final private = view?.incognito == true;
+    final colors = private
+        ? BrowserColors.incognito
+        : BrowserColors.of(context);
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => WindowCaption.apply(colors.frame),
     );
 
-    // A private tab gets a dark toolbar, whatever the theme.
+    // A private tab makes the whole window dark, whatever the theme.
     Widget chrome(Widget child) => view?.incognito == true
         ? Theme(
             data: buildTheme(
@@ -283,7 +348,7 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
       bindings: {
         for (final MapEntry(key: command, value: keys)
             in browserShortcuts.entries)
-          for (final key in keys) key: () => _run(command),
+          for (final key in keys) key: () => _runKey(command),
       },
       child: BrowserCommands(
         run: _run,
@@ -296,7 +361,7 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
               body: SafeArea(
                 child: Column(
                   children: [
-                    if (!compact && !fullscreen) const TabStrip(),
+                    if (!compact && !fullscreen) chrome(const TabStrip()),
                     if (!fullscreen)
                       chrome(
                         BrowserToolbar(
@@ -315,6 +380,8 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
                           ],
                         ),
                       ),
+                    if (!fullscreen)
+                      Container(height: 1, color: colors.separator),
                     Expanded(
                       child: state.tabs.isEmpty
                           ? const Center(child: CircularProgressIndicator())
@@ -326,7 +393,11 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
                                     children: [
                                       for (final t in state.tabs)
                                         KeyedSubtree(
-                                          key: ValueKey(t.id),
+                                          // IndexedStack wraps each child in
+                                          // an unkeyed widget, so a plain
+                                          // key rebuilt every tab after a
+                                          // closed or inserted one.
+                                          key: GlobalObjectKey(t.view),
                                           // Saves and fills passwords.
                                           child: PasswordHost(
                                             view: t.view,
@@ -338,9 +409,24 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
                                                       t.view.isReady,
                                                   builder: (_, ready, _) =>
                                                       ready
-                                                      ? PageContextMenuHost(
-                                                          view: t.view,
-                                                          child: t.view.widget,
+                                                      // Pages without a background
+                                                      // draw on white, as in Chrome
+                                                      // (the engine leaves them
+                                                      // transparent).
+                                                      ? ColoredBox(
+                                                          color: Colors.white,
+                                                          child:
+                                                              PageContextMenuHost(
+                                                                view: t.view,
+                                                                child: _PageKeys(
+                                                                  view: t.view,
+                                                                  onKey:
+                                                                      _onPageKey,
+                                                                  child: t
+                                                                      .view
+                                                                      .widget,
+                                                                ),
+                                                              ),
                                                         )
                                                       : const Center(
                                                           child:
@@ -437,4 +523,48 @@ class _WebStoreBar extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Runs browser shortcuts for keys the page did not handle.
+class _PageKeys extends StatefulWidget {
+  const _PageKeys({
+    required this.view,
+    required this.onKey,
+    required this.child,
+  });
+
+  final BrowserView view;
+  final ValueChanged<PageKey> onKey;
+  final Widget child;
+
+  @override
+  State<_PageKeys> createState() => _PageKeysState();
+}
+
+class _PageKeysState extends State<_PageKeys> {
+  StreamSubscription<PageKey>? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    _sub = widget.view.unhandledKeys.listen((k) => widget.onKey(k));
+  }
+
+  @override
+  void didUpdateWidget(_PageKeys old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.view, widget.view)) {
+      _sub?.cancel();
+      _sub = widget.view.unhandledKeys.listen((k) => widget.onKey(k));
+    }
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

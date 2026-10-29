@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,8 +14,9 @@ import '../tabs/tabs_controller.dart';
 import '../tabs/url_input.dart';
 import 'new_tab_tiles.dart';
 
-const _tileWidth = 104.0;
-const _tileSpacing = 8.0;
+const _tileWidth = 96.0;
+const _tileSpacing = 10.0;
+const _iconTile = 64.0;
 
 /// The built-in New Tab page: a search box and a grid of shortcuts and
 /// most visited sites that can be added, edited, removed and dragged.
@@ -61,13 +63,13 @@ class NewTabPage extends ConsumerWidget {
                     constraints: BoxConstraints(minWidth: box.maxWidth),
                     child: Column(
                       children: [
-                        SizedBox(height: (box.maxHeight * 0.12).clamp(24, 120)),
+                        SizedBox(height: (box.maxHeight * 0.14).clamp(24, 140)),
                         if (view.incognito)
                           const _IncognitoHeader()
                         else
                           const _Logo(),
                         _SearchBox(view: view),
-                        const SizedBox(height: 36),
+                        const SizedBox(height: 44),
                         if (!view.incognito) _TileGrid(view: view),
                         const SizedBox(height: 72),
                       ],
@@ -79,9 +81,8 @@ class NewTabPage extends ConsumerWidget {
                 PositionedDirectional(
                   end: 16,
                   bottom: 16,
-                  child: FilledButton.tonalIcon(
-                    icon: const Icon(Icons.edit_outlined, size: 18),
-                    label: const Text('Customize'),
+                  child: _CustomizeButton(
+                    color: colors.ntpText,
                     onPressed: () => showCustomizePanel(context),
                   ),
                 ),
@@ -104,26 +105,49 @@ class NewTabPage extends ConsumerWidget {
   }
 }
 
+/// The app's mark, small and quiet like Safari's Start Page.
 class _Logo extends StatelessWidget {
   const _Logo();
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 28),
+    padding: const EdgeInsets.only(bottom: 26),
     child: Column(
       children: [
-        Image.asset('assets/logo.png', width: 72, height: 72),
-        const SizedBox(height: 10),
+        Image.asset('assets/logo.png', width: 56, height: 56),
+        const SizedBox(height: 12),
         Text(
           '6browser',
-          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-            fontWeight: FontWeight.w500,
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+            fontSize: 26,
             color: DefaultTextStyle.of(context).style.color,
             shadows: DefaultTextStyle.of(context).style.shadows,
           ),
         ),
       ],
     ),
+  );
+}
+
+/// "Customize" in the corner of the page: a glyph and a word on a faint
+/// fill.
+class _CustomizeButton extends StatelessWidget {
+  const _CustomizeButton({required this.color, required this.onPressed});
+
+  final Color color;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => TextButton.icon(
+    style: TextButton.styleFrom(
+      foregroundColor: color.withValues(alpha: 0.75),
+      backgroundColor: color.withValues(alpha: 0.05),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(fontSize: 13),
+    ),
+    icon: const Icon(CupertinoIcons.slider_horizontal_3, size: 16),
+    label: const Text('Customize'),
+    onPressed: onPressed,
   );
 }
 
@@ -135,8 +159,8 @@ class _IncognitoHeader extends StatelessWidget {
     padding: const EdgeInsets.only(bottom: 24),
     child: Column(
       children: [
-        const Icon(Icons.visibility_off, size: 48),
-        const SizedBox(height: 12),
+        const Icon(CupertinoIcons.eye_slash, size: 44),
+        const SizedBox(height: 14),
         Text(
           'You are browsing privately',
           style: Theme.of(context).textTheme.titleLarge,
@@ -164,19 +188,18 @@ class _SearchBox extends ConsumerWidget {
         .firstOrNull;
     final colors = BrowserColors.of(context);
     final scheme = Theme.of(context).colorScheme;
+    final fill = view.incognito
+        ? BrowserColors.incognito.omnibox
+        : colors.omnibox;
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 600),
+      constraints: const BoxConstraints(maxWidth: 560),
       child: Material(
-        elevation: 2,
-        shadowColor: Colors.black38,
-        borderRadius: BorderRadius.circular(28),
-        color: view.incognito
-            ? BrowserColors.incognito.omnibox
-            : colors.toolbar,
+        borderRadius: BorderRadius.circular(Ui.radiusLarge),
+        color: fill,
         child: TextField(
           key: const ValueKey('newtab-search'),
           style: TextStyle(
-            fontSize: 16,
+            fontSize: 15,
             color: view.incognito
                 ? BrowserColors.incognito.omniboxText
                 : colors.omniboxText,
@@ -185,8 +208,12 @@ class _SearchBox extends ConsumerWidget {
           decoration: InputDecoration(
             filled: false,
             prefixIcon: Padding(
-              padding: const EdgeInsetsDirectional.only(start: 8),
-              child: Icon(Icons.search, color: scheme.onSurfaceVariant),
+              padding: const EdgeInsetsDirectional.only(start: 6),
+              child: Icon(
+                CupertinoIcons.search,
+                size: 18,
+                color: scheme.onSurfaceVariant,
+              ),
             ),
             hintText: engine == null
                 ? 'Search or type a URL'
@@ -196,14 +223,21 @@ class _SearchBox extends ConsumerWidget {
               shadows: const [],
             ),
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(28),
+              borderRadius: BorderRadius.circular(Ui.radiusLarge),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(Ui.radiusLarge),
               borderSide: BorderSide.none,
             ),
             focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(28),
-              borderSide: BorderSide(color: scheme.primary, width: 2),
+              borderRadius: BorderRadius.circular(Ui.radiusLarge),
+              borderSide: BorderSide(
+                color: scheme.primary.withValues(alpha: 0.6),
+                width: 3,
+              ),
             ),
-            contentPadding: const EdgeInsets.symmetric(vertical: 18),
+            contentPadding: const EdgeInsets.symmetric(vertical: 15),
           ),
           onSubmitted: (text) {
             if (text.trim().isEmpty) return;
@@ -258,35 +292,49 @@ class _TileGrid extends ConsumerWidget {
         final slots = perRow * 2;
         final canAdd = customCount < math.min(maxTiles, slots - 1);
         final shown = tiles.take(canAdd ? slots - 1 : slots);
-        return ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: perRow * (_tileWidth + _tileSpacing),
-          ),
-          child: Wrap(
-            alignment: WrapAlignment.center,
-            spacing: _tileSpacing,
-            runSpacing: 12,
+        final width = perRow * (_tileWidth + _tileSpacing) - _tileSpacing;
+        return SizedBox(
+          width: math.min(width, box.maxWidth),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              for (final (i, t) in shown.indexed)
-                _DraggableTile(
-                  key: ValueKey(t.url),
-                  index: i,
-                  tile: t,
-                  onOpen: () => view.load(t.url),
-                  onOpenInBackground: () => ref
-                      .read(tabsProvider.notifier)
-                      .newTab(url: t.url, activate: false),
-                  onEdit: () => edit(i),
-                  onRemove: () => remove(i),
-                  onMove: actions.move,
+              Padding(
+                padding: const EdgeInsets.only(left: 4, bottom: 14),
+                child: Text(
+                  'Favorites',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontSize: 17,
+                    color: DefaultTextStyle.of(context).style.color,
+                    shadows: DefaultTextStyle.of(context).style.shadows,
+                  ),
                 ),
-              if (canAdd)
-                _AddTile(
-                  onTap: () async {
-                    final r = await showShortcutDialog(context);
-                    if (r != null) await actions.add(r.$1, r.$2);
-                  },
-                ),
+              ),
+              Wrap(
+                spacing: _tileSpacing,
+                runSpacing: 14,
+                children: [
+                  for (final (i, t) in shown.indexed)
+                    _DraggableTile(
+                      key: ValueKey(t.url),
+                      index: i,
+                      tile: t,
+                      onOpen: () => view.load(t.url),
+                      onOpenInBackground: () => ref
+                          .read(tabsProvider.notifier)
+                          .newTab(url: t.url, activate: false),
+                      onEdit: () => edit(i),
+                      onRemove: () => remove(i),
+                      onMove: actions.move,
+                    ),
+                  if (canAdd)
+                    _AddTile(
+                      onTap: () async {
+                        final r = await showShortcutDialog(context);
+                        if (r != null) await actions.add(r.$1, r.$2);
+                      },
+                    ),
+                ],
+              ),
             ],
           ),
         );
@@ -338,7 +386,7 @@ class _DraggableTile extends StatelessWidget {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 120),
           foregroundDecoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(
               width: 2,
               color: candidates.isEmpty
@@ -414,7 +462,8 @@ class _TileState extends State<_Tile> {
           message: widget.tile.title,
           waitDuration: const Duration(milliseconds: 600),
           child: InkWell(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(16),
+            hoverColor: Colors.transparent,
             onTap: widget.onOpen,
             child: Stack(
               children: [
@@ -422,13 +471,23 @@ class _TileState extends State<_Tile> {
                 if (_hover)
                   Positioned(
                     top: 0,
-                    right: 0,
+                    right: 2,
                     child: Builder(
                       builder: (context) => IconButton(
                         tooltip: 'More actions',
-                        iconSize: 18,
-                        visualDensity: VisualDensity.compact,
-                        icon: const Icon(Icons.more_vert),
+                        iconSize: 14,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints.tightFor(
+                          width: 24,
+                          height: 24,
+                        ),
+                        style: IconButton.styleFrom(
+                          shape: const CircleBorder(),
+                          backgroundColor: Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerHighest,
+                        ),
+                        icon: const Icon(CupertinoIcons.ellipsis),
                         onPressed: () {
                           final box = context.findRenderObject() as RenderBox;
                           _menu(
@@ -457,35 +516,45 @@ class _TileFace extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = BrowserColors.of(context);
-    return Container(
+    final light = colors.brightness == Brightness.light;
+    return SizedBox(
       width: _tileWidth,
-      padding: const EdgeInsets.fromLTRB(8, 12, 8, 8),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        color: hover ? colors.ntpText.withValues(alpha: 0.08) : null,
-      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 56,
-            height: 56,
+          AnimatedContainer(
+            duration: Ui.fast,
+            curve: Ui.curve,
+            width: _iconTile,
+            height: _iconTile,
             alignment: Alignment.center,
+            transform: Matrix4.translationValues(0, hover ? -2 : 0, 0),
             decoration: BoxDecoration(
-              color: colors.omnibox,
-              shape: BoxShape.circle,
+              color: light ? Colors.white : colors.omnibox,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: colors.separator.withValues(alpha: 0.06),
+              ),
+              boxShadow: Ui.shadow(
+                colors.brightness,
+                strength: hover ? 0.9 : 0.45,
+              ),
             ),
             child: SiteIcon(url: tile.url, title: tile.title),
           ),
           const SizedBox(height: 8),
           SizedBox(
-            height: 34,
+            height: 32,
             child: Text(
               tile.title,
               maxLines: 2,
               textAlign: TextAlign.center,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, height: 1.4),
+              style: TextStyle(
+                fontSize: 11.5,
+                height: 1.35,
+                color: colors.ntpText.withValues(alpha: 0.85),
+              ),
             ),
           ),
         ],
@@ -537,12 +606,25 @@ class _LetterIcon extends StatelessWidget {
     final letter = source.isEmpty ? '?' : source.characters.first.toUpperCase();
     final color =
         Colors.primaries[source.hashCode.abs() % Colors.primaries.length];
-    return CircleAvatar(
-      radius: 16,
-      backgroundColor: color.shade600,
+    return Container(
+      width: 36,
+      height: 36,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(9),
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [color.shade400, color.shade600],
+        ),
+      ),
       child: Text(
         letter,
-        style: const TextStyle(color: Colors.white, fontSize: 16),
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 17,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }
@@ -555,24 +637,41 @@ class _AddTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final colors = BrowserColors.of(context);
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(16),
+      hoverColor: Colors.transparent,
       onTap: onTap,
-      child: Container(
+      child: SizedBox(
         width: _tileWidth,
-        padding: const EdgeInsets.fromLTRB(8, 14, 8, 8),
         child: Column(
           children: [
-            CircleAvatar(
-              radius: 26,
-              backgroundColor: scheme.primaryContainer,
-              child: Icon(Icons.add, color: scheme.onPrimaryContainer),
+            Container(
+              width: _iconTile,
+              height: _iconTile,
+              decoration: BoxDecoration(
+                color: colors.ntpText.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: colors.ntpText.withValues(alpha: 0.12),
+                ),
+              ),
+              child: Icon(
+                CupertinoIcons.add,
+                size: 22,
+                color: colors.ntpText.withValues(alpha: 0.55),
+              ),
             ),
-            const SizedBox(height: 10),
-            const SizedBox(
-              height: 34,
-              child: Text('Add shortcut', style: TextStyle(fontSize: 12)),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 32,
+              child: Text(
+                'Add shortcut',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: colors.ntpText.withValues(alpha: 0.7),
+                ),
+              ),
             ),
           ],
         ),

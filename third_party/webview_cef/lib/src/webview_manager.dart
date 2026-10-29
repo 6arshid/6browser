@@ -32,7 +32,8 @@ class WebviewManager extends ValueNotifier<bool> {
   /// Returns true if the platform has native key event handling (e.g., GTK on desktop Linux).
   /// When false, Dart-side key handling should be used (e.g., eLinux).
   Future<bool> get hasNativeKeySupport async {
-    _hasNativeKeySupport ??= await pluginChannel.invokeMethod<bool>('hasNativeKeySupport') ?? false;
+    _hasNativeKeySupport ??=
+        await pluginChannel.invokeMethod<bool>('hasNativeKeySupport') ?? false;
     return _hasNativeKeySupport!;
   }
 
@@ -172,9 +173,23 @@ class WebviewManager extends ValueNotifier<bool> {
             call.arguments['activeMatch'] as int,
             call.arguments['finalUpdate'] as bool);
         return;
+      case 'onUnhandledKey':
+        int browserId = call.arguments['browserId'] as int;
+        _webViews[browserId]?.listener?.onUnhandledKey?.call(
+            call.arguments['keyCode'] as int,
+            call.arguments['modifiers'] as int);
+        return;
+      case 'onNewWindow':
+        int browserId = call.arguments['browserId'] as int;
+        _webViews[browserId]?.listener?.onNewWindow?.call(
+            call.arguments['url'] as String,
+            call.arguments['disposition'] as int);
+        return;
       case 'onZoomChanged':
         int browserId = call.arguments['browserId'] as int;
-        _webViews[browserId]?.listener?.onZoomChanged
+        _webViews[browserId]
+            ?.listener
+            ?.onZoomChanged
             ?.call((call.arguments['level'] as num).toDouble());
         return;
       case 'devToolsMessage':
@@ -184,27 +199,36 @@ class WebviewManager extends ValueNotifier<bool> {
         int browserId = call.arguments["browserId"] as int;
         String urlId = call.arguments["urlId"] as String;
 
-        await _injectUserScriptIfNeeds(browserId, _injectUserScripts[browserId]?.retrieveLoadStartInjectScripts() ?? []);
+        await _injectUserScriptIfNeeds(
+            browserId,
+            _injectUserScripts[browserId]?.retrieveLoadStartInjectScripts() ??
+                []);
 
-        WebViewController controller =
-        _webViews[browserId] as WebViewController;
-        _webViews[browserId]?.listener?.onLoadStart?.call(controller, urlId);
+        // 6browser patch: events can arrive after the tab was closed.
+        final controller = _webViews[browserId];
+        if (controller == null) return;
+        controller.listener?.onLoadStart?.call(controller, urlId);
         return;
       case 'onLoadEnd':
         int browserId = call.arguments["browserId"] as int;
         String urlId = call.arguments["urlId"] as String;
 
-        await _injectUserScriptIfNeeds(browserId, _injectUserScripts[browserId]?.retrieveLoadEndInjectScripts() ?? []);
+        await _injectUserScriptIfNeeds(
+            browserId,
+            _injectUserScripts[browserId]?.retrieveLoadEndInjectScripts() ??
+                []);
 
-        WebViewController controller =
-        _webViews[browserId] as WebViewController;
-        _webViews[browserId]?.listener?.onLoadEnd?.call(controller, urlId);
+        // 6browser patch: events can arrive after the tab was closed.
+        final controller = _webViews[browserId];
+        if (controller == null) return;
+        controller.listener?.onLoadEnd?.call(controller, urlId);
         return;
       default:
     }
   }
 
-  Future<void> _injectUserScriptIfNeeds(int browserId, List<UserScript> scripts) async {
+  Future<void> _injectUserScriptIfNeeds(
+      int browserId, List<UserScript> scripts) async {
     if (scripts.isEmpty) return;
 
     await _webViews[browserId]?.ready;

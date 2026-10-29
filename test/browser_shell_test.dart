@@ -4,6 +4,7 @@ import 'package:browser6/features/tabs/tabs_controller.dart';
 import 'package:browser6/ui/browser_shell.dart';
 import 'package:browser6/ui/mobile_chrome.dart';
 import 'package:browser6/ui/tab_strip.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -117,7 +118,7 @@ void main() {
     expect(find.text('Settings'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
-    await tester.tap(find.byIcon(Icons.add_box_outlined));
+    await tester.tap(find.byIcon(CupertinoIcons.plus_square));
     await tester.pumpAndSettle();
     expect(c.read(tabsProvider).tabs.length, 2);
   });
@@ -130,17 +131,19 @@ void main() {
     await tester.pump();
     String field() =>
         tester.widget<TextField>(find.byType(TextField)).controller!.text;
-    expect(field(), 'example.com');
+    // Unfocused, the site's name is shown centered over the field.
+    expect(find.text('example.com'), findsOneWidget);
 
     await tester.tap(find.byType(TextField));
     await tester.pump();
     expect(field(), 'https://www.example.com/a/b?q=1');
+    expect(find.text('example.com'), findsNothing);
     expect(find.byTooltip('Back'), findsNothing); // bar takes the whole row
     expect(find.byTooltip('Cancel'), findsOneWidget);
 
     FocusManager.instance.primaryFocus?.unfocus();
     await tester.pump();
-    expect(field(), 'example.com');
+    expect(find.text('example.com'), findsOneWidget);
     expect(find.byTooltip('Back'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 10));
   });
@@ -201,7 +204,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byType(TabStrip),
-        matching: find.byIcon(Icons.visibility_off),
+        matching: find.byIcon(CupertinoIcons.eye_slash),
       ),
       findsOneWidget,
     );
@@ -220,5 +223,20 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();
     expect(c.read(tabsProvider).tabs.length, 1);
+  });
+
+  testWidgets('only the selected tab renders', (tester) async {
+    final c = await pumpShell(tester, const Size(1200, 800));
+    final first = c.read(tabsProvider).active!.view as FakeView;
+    c.read(tabsProvider.notifier).newTab();
+    await tester.pump();
+    final second = c.read(tabsProvider).active!.view as FakeView;
+    expect(first.visible, isFalse);
+    expect(second.visible, isTrue);
+    c.read(tabsProvider.notifier).cycle();
+    await tester.pump();
+    expect(first.visible, isTrue);
+    expect(second.visible, isFalse);
+    await tester.pump(const Duration(milliseconds: 10));
   });
 }

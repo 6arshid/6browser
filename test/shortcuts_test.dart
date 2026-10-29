@@ -1,3 +1,4 @@
+import 'package:browser6/engine/browser_engine.dart';
 import 'package:browser6/features/tabs/tabs_controller.dart';
 import 'package:browser6/ui/browser_commands.dart';
 import 'package:browser6/ui/find_bar.dart';
@@ -196,8 +197,13 @@ void main() {
     await press(tester, LogicalKeyboardKey.keyU, ctrl: true);
     expect(activeView(c).url.value, 'view-source:https://a.example/');
 
+    // Selecting the tab gives its page the keyboard, so Ctrl+S goes to the
+    // page first and runs once the page leaves it.
     await press(tester, LogicalKeyboardKey.digit1, ctrl: true);
     await press(tester, LogicalKeyboardKey.keyS, ctrl: true);
+    expect(view.downloads, isEmpty);
+    view.unhandledKeyController.add(const PageKey(0x53, control: true));
+    await tester.pump();
     expect(view.downloads, ['https://a.example/']);
   });
 
@@ -225,5 +231,37 @@ void main() {
     expect(find.text('Reopen the last closed tab'), findsOneWidget);
     expect(find.text('Ctrl+Shift+T'), findsOneWidget);
     expect(find.text('Ctrl+1…8'), findsOneWidget);
+  });
+
+  test('keys the page left map back to commands', () {
+    expect(commandForPageKey(0x46, control: true), BrowserCommand.find);
+    expect(commandForPageKey(0x74), BrowserCommand.reload); // F5
+    expect(commandForPageKey(0x25, alt: true), BrowserCommand.back);
+    expect(commandForPageKey(0xBB, control: true), BrowserCommand.zoomIn);
+    expect(commandForPageKey(0x46), isNull); // plain F types a letter
+  });
+
+  testWidgets('a focused page gets Ctrl+F first; tab keys still work', (
+    tester,
+  ) async {
+    final c = await pumpShell(tester, _wide);
+    final view = activeView(c);
+    view.load('https://example.com/');
+    await tester.pump();
+    view.focus();
+    await tester.pump();
+
+    await press(tester, LogicalKeyboardKey.keyF, ctrl: true);
+    expect(find.byType(FindBar), findsNothing); // the page may handle it
+
+    view.unhandledKeyController.add(const PageKey(0x46, control: true));
+    await tester.pump();
+    expect(find.byType(FindBar), findsOneWidget);
+
+    await press(tester, LogicalKeyboardKey.escape);
+    view.focus();
+    await tester.pump();
+    await press(tester, LogicalKeyboardKey.keyT, ctrl: true);
+    expect(c.read(tabsProvider).tabs.length, 2); // reserved: always runs
   });
 }

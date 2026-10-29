@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <cstdint>
 #include <cstdio>
+#include <cmath>
 
 #include "include/base/cef_callback.h"
 #include "include/cef_app.h"
@@ -37,11 +38,6 @@ namespace stringpatch
 
 #include "webview_js_handler.h"
 
-namespace {
-// The only browser that currently get focused
-CefRefPtr<CefBrowser> current_focused_browser_ = nullptr;
-
-}  // namespace
 
 WebviewHandler::WebviewHandler() {
 
@@ -188,7 +184,6 @@ bool WebviewHandler::OnProcessMessageReceived(
 	std::string message_name = message->GetName();
     if (message_name == kFocusedNodeChangedMessage)
     {
-        current_focused_browser_ = browser;
         bool editable = message->GetArgumentList()->GetBool(0);
         onFocusedNodeChangeMessage(browser->GetIdentifier(), editable);
         if (editable) {
@@ -268,7 +263,7 @@ void WebviewHandler::OnDownloadUpdated(CefRefPtr<CefBrowser> browser,
     if (!onDownloadEvent) return;
     int state = 0;
     if (download_item->IsComplete()) state = 1;
-    else if (download_item->IsCanceled()) state = 2;
+    else if (download_item->IsCanceled() || download_item->IsInterrupted()) state = 2;
     onDownloadEvent(static_cast<int>(download_item->GetId()),
                     download_item->GetURL().ToString(),
                     download_item->GetFullPath().ToString(),
@@ -348,7 +343,7 @@ bool WebviewHandler::OnBeforePopup(CefRefPtr<CefBrowser> browser,
                                   int popup_id,
                                   const CefString& target_url,
                                   const CefString& target_frame_name,
-                                  WindowOpenDisposition target_disposition,
+                                  CefLifeSpanHandler::WindowOpenDisposition target_disposition,
                                   bool user_gesture,
                                   const CefPopupFeatures& popupFeatures,
                                   CefWindowInfo& windowInfo,
@@ -390,8 +385,80 @@ bool WebviewHandler::OnBeforePopup(CefRefPtr<CefBrowser> browser,
 #endif
         return false;
     }
-    loadUrl(browser->GetIdentifier(), target_url);
+    // 6browser patch: target=_blank links, window.open and Ctrl/middle clicks
+    // become tabs in the host, as in Chrome. Without a user gesture it is an
+    // unrequested popup, which Chrome's popup blocker drops too.
+    openInNewTab(browser, target_url, target_disposition, user_gesture);
     return true;
+}
+
+// 6browser patch: browser shortcuts the page did not use (Ctrl+F outside
+// Google Docs, Ctrl+K outside Slack) run in the host, as in Chrome.
+bool WebviewHandler::OnKeyEvent(CefRefPtr<CefBrowser> browser,
+                                const CefKeyEvent& event,
+                                CefEventHandle os_event) {
+    if (event.type == KEYEVENT_RAWKEYDOWN && onUnhandledKeyEvent) {
+        onUnhandledKeyEvent(browser->GetIdentifier(), event.windows_key_code,
+                            static_cast<int>(event.modifiers));
+    }
+    return false;
+}
+
+bool WebviewHandler::OnOpenURLFromTab(CefRefPtr<CefBrowser> browser,
+                                      CefRefPtr<CefFrame> frame,
+                                      const CefString& target_url,
+                                      CefRequestHandler::WindowOpenDisposition target_disposition,
+                                      bool user_gesture) {
+    switch (target_disposition) {
+        case CEF_WOD_NEW_FOREGROUND_TAB:
+        case CEF_WOD_NEW_BACKGROUND_TAB:
+        case CEF_WOD_NEW_POPUP:
+        case CEF_WOD_NEW_WINDOW:
+            openInNewTab(browser, target_url, target_disposition, user_gesture);
+            return true;
+        default:
+            return false;
+    }
+}
+
+void WebviewHandler::openInNewTab(CefRefPtr<CefBrowser> browser, const CefString& url,
+                                  int disposition, bool user_gesture) {
+    const std::string target = url.ToString();
+    if (!user_gesture || target.empty()) return;
+    if (onNewWindowEvent) {
+        onNewWindowEvent(browser->GetIdentifier(), target, disposition);
+    } else {
+        loadUrl(browser->GetIdentifier(), target);
+    }
+}
+
+void WebviewHandler::OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser,
+                                               TerminationStatus status,
+                                               int error_code,
+                                               const CefString& error_string) {
+    CEF_REQUIRE_UI_THREAD();
+    auto it = browser_map_.find(browser->GetIdentifier());
+    if (it == browser_map_.end()) return;
+    // A crashed renderer leaves a frozen frame. Reload once; if the page
+    // crashes again soon, show an error page instead of looping.
+    const auto now = std::chrono::steady_clock::now();
+    const bool recent = it->second.last_crash.time_since_epoch().count() != 0 &&
+                        now - it->second.last_crash < std::chrono::seconds(30);
+    it->second.last_crash = now;
+    if (!recent) {
+        browser->Reload();
+        return;
+    }
+    const std::string html =
+        "<!doctype html><meta charset=utf-8><title>Page crashed</title>"
+        "<style>body{font:15px system-ui,sans-serif;color:#1d1d1f;display:grid;"
+        "place-items:center;height:100vh;margin:0}div{text-align:center}"
+        "h1{font-size:22px;font-weight:600;margin:0 0 8px}p{color:#6e6e73;margin:0}"
+        "@media(prefers-color-scheme:dark){body{background:#1c1c1e;color:#f5f5f7}"
+        "p{color:#a1a1a6}}</style><div><h1>This page crashed</h1>"
+        "<p>Go back, or try the page again later.</p></div>";
+    browser->GetMainFrame()->LoadURL("data:text/html;charset=utf-8," +
+                                     CefURIEncode(html, false).ToString());
 }
 
 void WebviewHandler::OnTakeFocus(CefRefPtr<CefBrowser> browser, bool next)
@@ -424,10 +491,23 @@ void WebviewHandler::OnLoadError(CefRefPtr<CefBrowser> browser,
 
 void WebviewHandler::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                                  CefLoadHandler::TransitionType transition_type) {
-    if(onLoadStart){
-        onLoadStart(browser->GetIdentifier(), frame->GetURL());
+}
+
+// 6browser patch: the host's load start/end follow the whole tab, as the
+// spinner in Chrome does: from the moment a navigation starts (before the
+// server answers, so Stop works) until every frame is done. OnLoadStart and
+// OnLoadEnd fire per frame and only after commit, which made the spinner
+// flicker with iframes and ads.
+void WebviewHandler::OnLoadingStateChange(CefRefPtr<CefBrowser> browser,
+                                          bool isLoading,
+                                          bool canGoBack,
+                                          bool canGoForward) {
+    const std::string url = browser->GetMainFrame() ? browser->GetMainFrame()->GetURL().ToString() : "";
+    if (isLoading) {
+        if (onLoadStart) onLoadStart(browser->GetIdentifier(), url);
+    } else {
+        if (onLoadEnd) onLoadEnd(browser->GetIdentifier(), url);
     }
-    return;
 }
 
 void WebviewHandler::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
@@ -444,10 +524,6 @@ void WebviewHandler::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame
             "try{if(window.chrome){delete chrome.webstorePrivate;}}catch(e){}",
             frame->GetURL(), 0);
     }
-    if(onLoadEnd){
-        onLoadEnd(browser->GetIdentifier(), frame->GetURL());
-    }
-    return;
 }
 
 void WebviewHandler::CloseAllBrowsers(bool force_close) {
@@ -464,6 +540,11 @@ void WebviewHandler::CloseAllBrowsers(bool force_close) {
 
 void WebviewHandler::closeBrowser(int browserId)
 {
+    if (!CefCurrentlyOn(TID_UI)) {
+        CefPostTask(TID_UI, base::BindOnce(&WebviewHandler::closeBrowser, this, browserId));
+        return;
+    }
+    if (focused_browser_id_ == browserId) focused_browser_id_ = 0;
     auto it = browser_map_.find(browserId);
     if(it != browser_map_.end()){
         it->second.browser->GetHost()->CloseBrowser(true);
@@ -510,7 +591,10 @@ void WebviewHandler::createBrowser(std::string url, std::function<void(int)> cal
         request_context = m_incognitoContext;
     }
     auto created = CefBrowserHost::CreateBrowserSync(window_info, this, url, browser_settings, nullptr, request_context);
-    if (incognito) m_incognitoBrowsers.insert(created->GetIdentifier());
+    if (incognito) {
+        m_incognitoBrowsers.insert(created->GetIdentifier());
+        m_privateIds.insert(created->GetIdentifier());
+    }
     callback(created->GetIdentifier());
 #ifdef WEBVIEW_CEF_GPU_TEXTURE
     // The GPU shared-texture path is the only render path on this build (no
@@ -549,77 +633,185 @@ void WebviewHandler::sendExternalBeginFrame() {
 #endif
 }
 
-void WebviewHandler::sendScrollEvent(int browserId, int x, int y, int deltaX, int deltaY) {
-
-    auto it = browser_map_.find(browserId);
-    if (it != browser_map_.end()) {
-        CefMouseEvent ev;
-        ev.x = x;
-        ev.y = y;
-
-#ifndef __APPLE__
-        // The scrolling direction on Windows and Linux is different from MacOS
-        deltaY = -deltaY;
-        // Flutter scrolls too slowly, it looks more normal by 10x default speed.
-        it->second.browser->GetHost()->SendMouseWheelEvent(ev, deltaX * 10, deltaY * 10);
-#else
-        it->second.browser->GetHost()->SendMouseWheelEvent(ev, deltaX, deltaY);
-#endif
-
-
+// 6browser patch: |deltaX|/|deltaY| are the distance to scroll in view
+// coordinates (DIP), positive scrolls right/down. Fractions are kept per
+// browser so slow trackpad and smooth-wheel input is not rounded away.
+void WebviewHandler::sendScrollEvent(int browserId, int x, int y, double deltaX, double deltaY, int modifiers) {
+    if (!CefCurrentlyOn(TID_UI)) {
+        CefPostTask(TID_UI, base::BindOnce(&WebviewHandler::sendScrollEvent, this, browserId, x, y, deltaX, deltaY, modifiers));
+        return;
     }
+    auto it = browser_map_.find(browserId);
+    if (it == browser_map_.end() || !it->second.browser) return;
+    auto& info = it->second;
+    info.scroll_rest_x += deltaX;
+    info.scroll_rest_y += deltaY;
+
+    // Chromium scrolls content up/left for positive deltas.
+    int sendX, sendY;
+#ifdef _WIN32
+    // CEF reads Windows deltas as wheel units (WHEEL_DELTA a notch) and turns
+    // them into pixels with the system's lines/chars per notch, truncating;
+    // invert that so the page moves by exactly the requested distance.
+    UINT lines = 3, chars = 1;
+    SystemParametersInfo(SPI_GETWHEELSCROLLLINES, 0, &lines, 0);
+    SystemParametersInfo(SPI_GETWHEELSCROLLCHARS, 0, &chars, 0);
+    if (lines == 0 || lines == WHEEL_PAGESCROLL) lines = 3;
+    if (chars == 0) chars = 1;
+    const double pxPerUnitY = lines * (100.0 / 3.0) / WHEEL_DELTA;
+    const double pxPerUnitX = chars * (100.0 / 3.0) / WHEEL_DELTA;
+    sendX = static_cast<int>(std::lround(-info.scroll_rest_x / pxPerUnitX));
+    sendY = static_cast<int>(std::lround(-info.scroll_rest_y / pxPerUnitY));
+    // What CEF will actually scroll for these units (same float math as
+    // CefBrowserPlatformDelegateNativeWin::GetUiWheelEventOffset).
+    const int movedX = static_cast<int>(float(sendX) / WHEEL_DELTA * static_cast<float>(chars) * (100.0f / 3.0f));
+    const int movedY = static_cast<int>(float(sendY) / WHEEL_DELTA * static_cast<float>(lines) * (100.0f / 3.0f));
+    info.scroll_rest_x += movedX;
+    info.scroll_rest_y += movedY;
+    if (movedX == 0) sendX = 0;
+    if (movedY == 0) sendY = 0;
+#else
+    sendX = static_cast<int>(-info.scroll_rest_x);
+    sendY = static_cast<int>(-info.scroll_rest_y);
+    info.scroll_rest_x += sendX;
+    info.scroll_rest_y += sendY;
+#endif
+    if (sendX == 0 && sendY == 0) return;
+
+    CefMouseEvent ev;
+    ev.x = x;
+    ev.y = y;
+    ev.modifiers = static_cast<uint32_t>(modifiers);
+    info.browser->GetHost()->SendMouseWheelEvent(ev, sendX, sendY);
+    // Ctrl+wheel zooms the page (unless the page handles it); the zoom
+    // indicator only learns about it from here.
+    if (modifiers & EVENTFLAG_CONTROL_DOWN) {
+        CefPostDelayedTask(TID_UI, base::BindOnce(&WebviewHandler::reportZoomFor, this, browserId), 120);
+    }
+}
+
+void WebviewHandler::setVisible(int browserId, bool visible) {
+    if (!CefCurrentlyOn(TID_UI)) {
+        CefPostTask(TID_UI, base::BindOnce(&WebviewHandler::setVisible, this, browserId, visible));
+        return;
+    }
+    auto it = browser_map_.find(browserId);
+    if (it == browser_map_.end() || !it->second.browser) return;
+    auto host = it->second.browser->GetHost();
+    host->WasHidden(!visible);
+    if (visible) host->Invalidate(PET_VIEW);
+}
+
+void WebviewHandler::reportZoomFor(int browserId) {
+    auto it = browser_map_.find(browserId);
+    if (it != browser_map_.end() && it->second.browser) reportZoom(it->second.browser);
 }
 
 void WebviewHandler::changeSize(int browserId, float a_dpi, int w, int h)
 {
+    if (!CefCurrentlyOn(TID_UI)) {
+        CefPostTask(TID_UI, base::BindOnce(&WebviewHandler::changeSize, this, browserId, a_dpi, w, h));
+        return;
+    }
     auto it = browser_map_.find(browserId);
-    if (it != browser_map_.end()) {
+    if (it != browser_map_.end() && it->second.browser) {
+        const bool scaleChanged = it->second.dpi != a_dpi;
         it->second.dpi = a_dpi;
         it->second.width = w;
         it->second.height = h;
+        // 6browser patch: moving to a monitor with another scale keeps the
+        // logical size, so only this makes the page re-render sharply.
+        if (scaleChanged) it->second.browser->GetHost()->NotifyScreenInfoChanged();
         it->second.browser->GetHost()->WasResized();
     }
 }
 
-void WebviewHandler::cursorClick(int browserId, int x, int y, bool up, int button)
+// 6browser patch: input runs on the CEF UI thread (browser_map_ belongs to
+// it), carries the modifier keys (Ctrl+click opens a new tab, Shift+click
+// extends a selection) and the click count (double-click selects a word).
+void WebviewHandler::cursorClick(int browserId, int x, int y, bool up, int button, int clickCount, int modifiers)
 {
+    if (!CefCurrentlyOn(TID_UI)) {
+        CefPostTask(TID_UI, base::BindOnce(&WebviewHandler::cursorClick, this, browserId, x, y, up, button, clickCount, modifiers));
+        return;
+    }
     auto it = browser_map_.find(browserId);
-    if (it != browser_map_.end()) {
-        CefMouseEvent ev;
-        ev.x = x;
-        ev.y = y;
-        if (button == MBT_RIGHT || button == MBT_MIDDLE) {
-            ev.modifiers = button == MBT_RIGHT ? EVENTFLAG_RIGHT_MOUSE_BUTTON : EVENTFLAG_MIDDLE_MOUSE_BUTTON;
-            it->second.browser->GetHost()->SendMouseClickEvent(ev, static_cast<CefBrowserHost::MouseButtonType>(button), up, 1);
-            return;
-        }
-        ev.modifiers = EVENTFLAG_LEFT_MOUSE_BUTTON;
-        if(up && it->second.is_dragging) {
-            it->second.browser->GetHost()->DragTargetDrop(ev);
-            it->second.browser->GetHost()->DragSourceSystemDragEnded();
-            it->second.is_dragging = false;
-        } else {
-            it->second.browser->GetHost()->SendMouseClickEvent(ev, CefBrowserHost::MouseButtonType::MBT_LEFT, up, 1);
-        }
+    if (it == browser_map_.end() || !it->second.browser) return;
+    auto host = it->second.browser->GetHost();
+    CefMouseEvent ev;
+    ev.x = x;
+    ev.y = y;
+    clickCount = clickCount < 1 ? 1 : clickCount;
+    if (button == MBT_RIGHT || button == MBT_MIDDLE) {
+        ev.modifiers = modifiers | (button == MBT_RIGHT ? EVENTFLAG_RIGHT_MOUSE_BUTTON : EVENTFLAG_MIDDLE_MOUSE_BUTTON);
+        host->SendMouseClickEvent(ev, static_cast<CefBrowserHost::MouseButtonType>(button), up, clickCount);
+        return;
+    }
+    ev.modifiers = modifiers | EVENTFLAG_LEFT_MOUSE_BUTTON;
+    it->second.left_button_down = !up;
+    if (up && it->second.is_dragging) {
+        host->DragTargetDrop(ev);
+        host->DragSourceEndedAt(x, y, DRAG_OPERATION_MOVE);
+        host->DragSourceSystemDragEnded();
+        it->second.is_dragging = false;
+    } else {
+        host->SendMouseClickEvent(ev, CefBrowserHost::MouseButtonType::MBT_LEFT, up, clickCount);
     }
 }
 
-void WebviewHandler::cursorMove(int browserId, int x , int y, bool dragging)
+void WebviewHandler::cursorMove(int browserId, int x , int y, bool dragging, int modifiers)
 {
-    auto it = browser_map_.find(browserId);
-    if (it != browser_map_.end()) {
-        CefMouseEvent ev;
-        ev.x = x;
-        ev.y = y;
-        if(dragging) {
-            ev.modifiers = EVENTFLAG_LEFT_MOUSE_BUTTON;
-        }
-        if(it->second.is_dragging && dragging) {
-            it->second.browser->GetHost()->DragTargetDragOver(ev, DRAG_OPERATION_EVERY);
-        } else {
-            it->second.browser->GetHost()->SendMouseMoveEvent(ev, false);
-        }
+    if (!CefCurrentlyOn(TID_UI)) {
+        CefPostTask(TID_UI, base::BindOnce(&WebviewHandler::cursorMove, this, browserId, x, y, dragging, modifiers));
+        return;
     }
+    auto it = browser_map_.find(browserId);
+    if (it == browser_map_.end() || !it->second.browser) return;
+    CefMouseEvent ev;
+    ev.x = x;
+    ev.y = y;
+    ev.modifiers = modifiers | (dragging ? EVENTFLAG_LEFT_MOUSE_BUTTON : 0);
+    if(it->second.is_dragging && dragging) {
+        it->second.browser->GetHost()->DragTargetDragOver(ev, DRAG_OPERATION_EVERY);
+    } else {
+        it->second.browser->GetHost()->SendMouseMoveEvent(ev, false);
+    }
+}
+
+// The pointer left the view: hover effects and tooltips end, as in Chrome.
+void WebviewHandler::cursorLeave(int browserId, int x, int y)
+{
+    if (!CefCurrentlyOn(TID_UI)) {
+        CefPostTask(TID_UI, base::BindOnce(&WebviewHandler::cursorLeave, this, browserId, x, y));
+        return;
+    }
+    auto it = browser_map_.find(browserId);
+    if (it == browser_map_.end() || !it->second.browser || it->second.is_dragging) return;
+    CefMouseEvent ev;
+    ev.x = x;
+    ev.y = y;
+    it->second.browser->GetHost()->SendMouseMoveEvent(ev, true);
+}
+
+// A press the host lost (Flutter cancelled the pointer): end it without
+// dropping anything.
+void WebviewHandler::cursorCancel(int browserId, int x, int y, int button)
+{
+    if (!CefCurrentlyOn(TID_UI)) {
+        CefPostTask(TID_UI, base::BindOnce(&WebviewHandler::cursorCancel, this, browserId, x, y, button));
+        return;
+    }
+    auto it = browser_map_.find(browserId);
+    if (it == browser_map_.end() || !it->second.browser) return;
+    auto host = it->second.browser->GetHost();
+    if (it->second.is_dragging) {
+        host->DragTargetDragLeave();
+        host->DragSourceEndedAt(x, y, DRAG_OPERATION_NONE);
+        host->DragSourceSystemDragEnded();
+        it->second.is_dragging = false;
+        return;
+    }
+    cursorClick(browserId, x, y, true, button, 1, 0);
 }
 
 bool WebviewHandler::StartDragging(CefRefPtr<CefBrowser> browser,
@@ -628,7 +820,13 @@ bool WebviewHandler::StartDragging(CefRefPtr<CefBrowser> browser,
                                   int x,
                                   int y){
     auto it = browser_map_.find(browser->GetIdentifier());
-    if (it != browser_map_.end() && it->second.browser->IsSame(browser)) {
+    // 6browser patch: a quick flick can be released before the renderer asks
+    // to start the drag; starting it then left the page stuck in a drag.
+    if (it == browser_map_.end() || !it->second.browser || !it->second.browser->IsSame(browser) ||
+        !it->second.left_button_down) {
+        return false;
+    }
+    {
         CefMouseEvent ev;
         ev.x = x;
         ev.y = y;
@@ -666,7 +864,14 @@ void WebviewHandler::OnImeCompositionRangeChanged(CefRefPtr<CefBrowser> browser,
 
 void WebviewHandler::sendKeyEvent(CefKeyEvent& ev)
 {
-    auto browser = current_focused_browser_;
+    if (!CefCurrentlyOn(TID_UI)) {
+        CefKeyEvent copy = ev;
+        CefPostTask(TID_UI, base::BindOnce([](CefRefPtr<WebviewHandler> self, CefKeyEvent e) {
+            self->sendKeyEvent(e);
+        }, CefRefPtr<WebviewHandler>(this), copy));
+        return;
+    }
+    auto browser = getFocusedBrowser();
     if (!browser.get()) {
         return;
     }
@@ -869,6 +1074,15 @@ void WebviewHandler::imeCommitText(int browserId, std::string text)
 
 void WebviewHandler::setClientFocus(int browserId, bool focus)
 {
+    if (!CefCurrentlyOn(TID_UI)) {
+        CefPostTask(TID_UI, base::BindOnce(&WebviewHandler::setClientFocus, this, browserId, focus));
+        return;
+    }
+    if (focus) {
+        focused_browser_id_ = browserId;
+    } else if (focused_browser_id_ == browserId) {
+        focused_browser_id_ = 0;
+    }
     auto it = browser_map_.find(browserId);
     if (it==browser_map_.end() || !it->second.browser.get()) {
         return;
@@ -884,7 +1098,8 @@ void WebviewHandler::setClientFocus(int browserId, bool focus)
 
 CefRefPtr<CefBrowser> WebviewHandler::getFocusedBrowser()
 {
-    return current_focused_browser_;
+    auto it = browser_map_.find(focused_browser_id_);
+    return it == browser_map_.end() ? nullptr : it->second.browser;
 }
 
 void WebviewHandler::imeSetCompositionNative(const std::wstring& text, int cursor)
@@ -893,7 +1108,7 @@ void WebviewHandler::imeSetCompositionNative(const std::wstring& text, int curso
         CefPostTask(TID_UI, base::BindOnce(&WebviewHandler::imeSetCompositionNative, this, text, cursor));
         return;
     }
-    auto browser = current_focused_browser_;
+    auto browser = getFocusedBrowser();
     if (!browser.get()) {
         return;
     }
@@ -923,7 +1138,7 @@ void WebviewHandler::imeCommitTextNative(const std::wstring& text)
         CefPostTask(TID_UI, base::BindOnce(&WebviewHandler::imeCommitTextNative, this, text));
         return;
     }
-    auto browser = current_focused_browser_;
+    auto browser = getFocusedBrowser();
     if (!browser.get()) {
         return;
     }
@@ -938,11 +1153,21 @@ void WebviewHandler::imeFinishComposition()
         CefPostTask(TID_UI, base::BindOnce(&WebviewHandler::imeFinishComposition, this));
         return;
     }
-    auto browser = current_focused_browser_;
+    auto browser = getFocusedBrowser();
     if (!browser.get()) {
         return;
     }
     browser->GetHost()->ImeFinishComposingText(false);
+}
+
+void WebviewHandler::imeCancelComposition()
+{
+    if (!CefCurrentlyOn(TID_UI)) {
+        CefPostTask(TID_UI, base::BindOnce(&WebviewHandler::imeCancelComposition, this));
+        return;
+    }
+    auto browser = getFocusedBrowser();
+    if (browser.get()) browser->GetHost()->ImeCancelComposition();
 }
 
 void WebviewHandler::setCookie(const std::string& domain, const std::string& key, const std::string& value){
@@ -1073,11 +1298,12 @@ void WebviewHandler::executeJavaScript(int browserId, const std::string code, st
 
 void WebviewHandler::GetViewRect(CefRefPtr<CefBrowser> browser, CefRect &rect) {
     CEF_REQUIRE_UI_THREAD();
+    rect.x = rect.y = 0;
+    rect.width = rect.height = 1;  // CEF requires a non-empty rectangle
     auto it = browser_map_.find(browser->GetIdentifier());
     if(it == browser_map_.end() || !it->second.browser.get() || browser->IsPopup()) {
         return;
     }
-    rect.x = rect.y = 0;
     
     if (it->second.width < 1) {
         rect.width = 1;
@@ -1094,12 +1320,31 @@ void WebviewHandler::GetViewRect(CefRefPtr<CefBrowser> browser, CefRect &rect) {
 
 bool WebviewHandler::GetScreenInfo(CefRefPtr<CefBrowser> browser, CefScreenInfo& screen_info) {
     //todo: hi dpi support
-    screen_info.device_scale_factor  = browser_map_[browser->GetIdentifier()].dpi;
+    auto it = browser_map_.find(browser->GetIdentifier());
+    screen_info.device_scale_factor = it == browser_map_.end() ? 1.0f : it->second.dpi;
     return false;
+}
+
+void WebviewHandler::OnPopupShow(CefRefPtr<CefBrowser> browser, bool show) {
+    auto it = browser_map_.find(browser->GetIdentifier());
+    if (it == browser_map_.end()) return;
+    it->second.popup_visible = show;
+    if (!show) {
+        it->second.popup_rect = CefRect();
+        if (onPopupHiddenCallback) onPopupHiddenCallback(browser->GetIdentifier());
+    }
+}
+
+void WebviewHandler::OnPopupSize(CefRefPtr<CefBrowser> browser, const CefRect& rect) {
+    auto it = browser_map_.find(browser->GetIdentifier());
+    if (it != browser_map_.end()) it->second.popup_rect = rect;
 }
 
 void WebviewHandler::OnPaint(CefRefPtr<CefBrowser> browser, CefRenderHandler::PaintElementType type,
                             const CefRenderHandler::RectList &dirtyRects, const void *buffer, int w, int h) {
+    // 6browser patch: popup widgets are only drawn on the GPU path; never let
+    // one replace the page.
+    if (type != PET_VIEW) return;
     if (!browser->IsPopup() && onPaintCallback != nullptr) {
         onPaintCallback(browser->GetIdentifier(), buffer, w, h);
     }
@@ -1108,6 +1353,21 @@ void WebviewHandler::OnPaint(CefRefPtr<CefBrowser> browser, CefRenderHandler::Pa
 void WebviewHandler::OnAcceleratedPaint(CefRefPtr<CefBrowser> browser, CefRenderHandler::PaintElementType type,
                             const CefRenderHandler::RectList &dirtyRects, const CefAcceleratedPaintInfo &info) {
 #ifdef WEBVIEW_CEF_GPU_TEXTURE
+    if (type == PET_POPUP) {
+        // 6browser patch: drawn over the page by the renderer.
+        auto it = browser_map_.find(browser->GetIdentifier());
+        if (it == browser_map_.end() || !it->second.popup_visible || !onAcceleratedPopupCallback) return;
+#ifdef __APPLE__
+        const void* popupTexture = reinterpret_cast<const void*>(info.shared_texture_io_surface);
+#else
+        const void* popupTexture = reinterpret_cast<const void*>(info.shared_texture_handle);
+#endif
+        const float dpi = it->second.dpi;
+        onAcceleratedPopupCallback(browser->GetIdentifier(), popupTexture,
+                                   static_cast<int32_t>(std::lround(it->second.popup_rect.x * dpi)),
+                                   static_cast<int32_t>(std::lround(it->second.popup_rect.y * dpi)));
+        return;
+    }
     if (!browser->IsPopup() && onAcceleratedPaintCallback != nullptr) {
         received_accelerated_frame_ = true;
         int w = 0, h = 0;

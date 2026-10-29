@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform;
@@ -62,6 +64,11 @@ class TabsController extends Notifier<TabsState> {
   /// Private tabs are never remembered.
   final _closed = <String>[];
 
+  /// Tab id -> id of the tab whose link opened it, so link tabs line up to
+  /// the right of their opener, as in Chrome.
+  final _openers = <int, int>{};
+  final _newTabSubs = <int, StreamSubscription<NewTabRequest>>{};
+
   BrowserEngine get _engine => ref.read(engineProvider);
 
   @override
@@ -71,6 +78,9 @@ class TabsController extends Notifier<TabsState> {
     var live = const <BrowserTab>[];
     listenSelf((_, next) => live = next.tabs);
     ref.onDispose(() {
+      for (final sub in _newTabSubs.values) {
+        sub.cancel();
+      }
       for (final t in live) {
         t.view.dispose();
       }
@@ -93,26 +103,29 @@ class TabsController extends Notifier<TabsState> {
     newTab(url: launch.url, incognito: launch.incognito);
   }
 
-  /// Mirrors engine download events into the database.
+  /// Mirrors engine download events into the database. The engine numbers
+  /// downloads from 1 in every session, so rows get ids unique across
+  /// sessions (or a new download replaced an old one after a restart).
   void _recordDownloads() {
+    final db = ref.read(databaseProvider);
+    db.endStaleDownloads();
+    final session = DateTime.now().millisecondsSinceEpoch * 1000;
     final started = <int, DateTime>{};
     final sub = _engine.downloads.listen((e) {
       if (e.incognito) return; // private downloads are not listed
       final path = e.path;
-      ref
-          .read(databaseProvider)
-          .upsertDownload(
-            DownloadsCompanion(
-              id: Value(e.id),
-              url: Value(e.url),
-              fileName: Value(fileNameOf(path, fallback: e.url)),
-              path: Value(path),
-              receivedBytes: Value(e.receivedBytes),
-              totalBytes: Value(e.totalBytes),
-              state: Value(e.state.name),
-              startedAt: Value(started.putIfAbsent(e.id, DateTime.now)),
-            ),
-          );
+      db.upsertDownload(
+        DownloadsCompanion(
+          id: Value(session + e.id),
+          url: Value(e.url),
+          fileName: Value(fileNameOf(path, fallback: e.url)),
+          path: Value(path),
+          receivedBytes: Value(e.receivedBytes),
+          totalBytes: Value(e.totalBytes),
+          state: Value(e.state.name),
+          startedAt: Value(started.putIfAbsent(e.id, DateTime.now)),
+        ),
+      );
     });
     ref.onDispose(sub.cancel);
   }
@@ -120,15 +133,41 @@ class TabsController extends Notifier<TabsState> {
   /// Opens a tab (the New Tab page unless [url] is given) and, by default,
   /// selects it. Returns its id.
   int newTab({String? url, bool activate = true, bool incognito = false}) {
-    final view = _engine.createView(
-      initialUrl: url ?? newTabUrl,
-      incognito: incognito,
-    );
-    _recordHistory(view);
-    final tab = BrowserTab(id: _nextId++, view: view);
+    final tab = _createTab(url ?? newTabUrl, incognito: incognito);
     state = TabsState(
       tabs: [...state.tabs, tab],
       activeId: activate ? tab.id : state.activeId ?? tab.id,
+    );
+    return tab.id;
+  }
+
+  BrowserTab _createTab(String url, {required bool incognito}) {
+    final view = _engine.createView(initialUrl: url, incognito: incognito);
+    _recordHistory(view);
+    final tab = BrowserTab(id: _nextId++, view: view);
+    _newTabSubs[tab.id] = view.newTabRequests.listen(
+      (r) => openFromTab(tab.id, r.url, background: r.background),
+    );
+    return tab;
+  }
+
+  /// Opens a link from tab [openerId] in a new tab to its right (after the
+  /// tabs it already opened), private if the opener is. [background] keeps
+  /// the opener selected (Ctrl or middle click).
+  int? openFromTab(int openerId, String url, {bool background = false}) {
+    final i = state.tabs.indexWhere((t) => t.id == openerId);
+    if (i < 0) return null;
+    final opener = state.tabs[i];
+    final tab = _createTab(url, incognito: opener.view.incognito);
+    _openers[tab.id] = openerId;
+    var at = i + 1;
+    while (at < state.tabs.length && _openers[state.tabs[at].id] == openerId) {
+      at++;
+    }
+    final tabs = [...state.tabs]..insert(at, tab);
+    state = TabsState(
+      tabs: _pinnedFirst(tabs),
+      activeId: background ? state.activeId : tab.id,
     );
     return tab.id;
   }
@@ -191,6 +230,8 @@ class TabsController extends Notifier<TabsState> {
       active = remaining[i.clamp(0, remaining.length - 1)].id;
     }
     state = TabsState(tabs: remaining, activeId: active);
+    _newTabSubs.remove(id)?.cancel();
+    _openers.remove(id);
     closing.view.dispose();
     if (remaining.isEmpty) newTab();
   }
@@ -200,12 +241,10 @@ class TabsController extends Notifier<TabsState> {
     final i = state.tabs.indexWhere((t) => t.id == id);
     if (i < 0) return;
     final url = state.tabs[i].view.url.value;
-    final view = _engine.createView(
-      initialUrl: url.isEmpty ? newTabUrl : url,
+    final copy = _createTab(
+      url.isEmpty ? newTabUrl : url,
       incognito: state.tabs[i].view.incognito,
     );
-    _recordHistory(view);
-    final copy = BrowserTab(id: _nextId++, view: view);
     final tabs = [...state.tabs]..insert(i + 1, copy);
     state = TabsState(tabs: _pinnedFirst(tabs), activeId: copy.id);
   }
@@ -233,12 +272,14 @@ class TabsController extends Notifier<TabsState> {
     view.isLoading.addListener(() {
       final loading = view.isLoading.value;
       if (wasLoading && !loading) {
+        final url = view.url.value;
         Future<void>.delayed(const Duration(milliseconds: 600), () {
           if (view.incognito) return; // private tabs leave no history
-          final url = view.url.value;
-          // Sub-frames and redirects fire extra load-end events for the same
-          // page, so skip a URL that was just recorded for this tab.
+          // Redirects fire extra load-end events for the same page, so skip
+          // a URL that was just recorded for this tab; and if the tab has
+          // moved on meanwhile, its title belongs to another page.
           if (!isRecordableUrl(url) || url == lastRecorded) return;
+          if (view.url.value != url) return;
           lastRecorded = url;
           ref.read(databaseProvider).addHistory(url, view.title.value);
         });

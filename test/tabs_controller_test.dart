@@ -191,4 +191,39 @@ void main() {
     ctl().cycle();
     expect(c.read(tabsProvider).activeId, a);
   });
+
+  group('links that open new tabs', () {
+    test('open right after their opener, in order', () {
+      final opener = c.read(tabsProvider).tabs.first;
+      ctl().newTab(); // a tab at the end, after the opener
+      final v = opener.view as FakeView;
+      ctl().select(opener.id);
+      final a = ctl().openFromTab(opener.id, 'https://a.com/')!;
+      ctl().select(opener.id);
+      final b = ctl().openFromTab(opener.id, 'https://b.com/')!;
+      final ids = c.read(tabsProvider).tabs.map((t) => t.id).toList();
+      expect(ids.sublist(0, 3), [opener.id, a, b]);
+      expect(c.read(tabsProvider).activeId, b);
+      expect(v.disposed, isFalse);
+    });
+
+    test('Ctrl/middle click keeps the opener selected', () async {
+      final opener = c.read(tabsProvider).tabs.first;
+      (opener.view as FakeView).newTabController.add(
+        const NewTabRequest('https://a.com/', background: true),
+      );
+      await Future<void>.delayed(Duration.zero);
+      final tabs = c.read(tabsProvider).tabs;
+      expect(tabs.length, 2);
+      expect(tabs[1].view.url.value, 'https://a.com/');
+      expect(c.read(tabsProvider).activeId, opener.id);
+    });
+
+    test('a private tab opens private tabs', () {
+      final id = ctl().newIncognitoTab();
+      final child = ctl().openFromTab(id, 'https://a.com/')!;
+      final tab = c.read(tabsProvider).tabs.firstWhere((t) => t.id == child);
+      expect(tab.view.incognito, isTrue);
+    });
+  });
 }

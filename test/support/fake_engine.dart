@@ -18,8 +18,14 @@ class FakeView implements BrowserView {
   final ValueNotifier<bool> isLoading = ValueNotifier(false);
   @override
   final ValueNotifier<bool> isReady = ValueNotifier(true);
+
+  /// The page's keyboard focus, like the real engine's view.
+  final pageFocus = FocusNode(debugLabel: 'fake page');
   @override
-  Widget get widget => const SizedBox();
+  late final Widget widget = Focus(
+    focusNode: pageFocus,
+    child: const SizedBox.expand(),
+  );
   @override
   bool get supportsStop => false;
   @override
@@ -70,6 +76,22 @@ class FakeView implements BrowserView {
   final downloads = <String>[];
   @override
   Stream<PageContextMenu> get contextMenus => contextMenuController.stream;
+  final newTabController = StreamController<NewTabRequest>.broadcast();
+  @override
+  Stream<NewTabRequest> get newTabRequests => newTabController.stream;
+  final unhandledKeyController = StreamController<PageKey>.broadcast();
+  @override
+  Stream<PageKey> get unhandledKeys => unhandledKeyController.stream;
+  bool visible = true;
+  @override
+  void setVisible(bool visible) => this.visible = visible;
+  int focusRequests = 0;
+  @override
+  void focus() {
+    focusRequests++;
+    pageFocus.requestFocus();
+  }
+
   @override
   Future<void> editCommand(EditCommand command) async =>
       editCommands.add(command);

@@ -58,10 +58,22 @@ class WebviewContextMenu {
 typedef ContextMenuCb = void Function(WebviewContextMenu menu);
 
 /// 6browser patch: find-in-page progress. [activeMatch] is 1-based.
-typedef FindResultCb = void Function(int count, int activeMatch, bool finalUpdate);
+typedef FindResultCb = void Function(
+    int count, int activeMatch, bool finalUpdate);
 
 /// 6browser patch: Chromium zoom level (0 is 100%, each step a factor 1.2).
 typedef ZoomChangedCb = void Function(double level);
+
+/// 6browser patch: a link or script asked for a new tab or window.
+/// [disposition] is a cef_window_open_disposition_t (see [cefNewBackgroundTab]).
+typedef NewWindowCb = void Function(String url, int disposition);
+
+/// 6browser patch: a key press the page did not handle: Windows virtual key
+/// code and CEF event flags (eventFlagControlDown and so on).
+typedef UnhandledKeyCb = void Function(int keyCode, int modifiers);
+
+/// CEF_WOD_NEW_BACKGROUND_TAB: Ctrl+click or middle click on a link.
+const int cefNewBackgroundTab = 4;
 
 class WebviewEventsListener {
   TitleChangeCb? onTitleChanged;
@@ -72,6 +84,8 @@ class WebviewEventsListener {
   ContextMenuCb? onContextMenu;
   FindResultCb? onFindResult;
   ZoomChangedCb? onZoomChanged;
+  NewWindowCb? onNewWindow;
+  UnhandledKeyCb? onUnhandledKey;
 
   WebviewEventsListener({
     this.onTitleChanged,
@@ -82,5 +96,7 @@ class WebviewEventsListener {
     this.onContextMenu,
     this.onFindResult,
     this.onZoomChanged,
+    this.onNewWindow,
+    this.onUnhandledKey,
   });
 }

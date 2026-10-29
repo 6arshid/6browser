@@ -86,6 +86,18 @@ class CefBrowserView implements BrowserView {
             _findResult.value = FindResult(count: count, active: active),
         // Chromium zoom level: each step is a factor of 1.2.
         onZoomChanged: (level) => _zoom.value = pow(1.2, level).toDouble(),
+        onNewWindow: (url, disposition) => _newTabs.add(
+          NewTabRequest(url, background: disposition == cefNewBackgroundTab),
+        ),
+        onUnhandledKey: (code, flags) => _keys.add(
+          PageKey(
+            code,
+            control: flags & eventFlagControlDown != 0,
+            shift: flags & eventFlagShiftDown != 0,
+            alt: flags & eventFlagAltDown != 0,
+            meta: flags & eventFlagCommandDown != 0,
+          ),
+        ),
       ),
     );
     // The plugin's V8 extension defines external.JavaScriptChannel in every
@@ -111,6 +123,8 @@ class CefBrowserView implements BrowserView {
   final _isLoading = ValueNotifier<bool>(false);
   final _isReady = ValueNotifier<bool>(false);
   final _contextMenus = StreamController<PageContextMenu>.broadcast();
+  final _newTabs = StreamController<NewTabRequest>.broadcast();
+  final _keys = StreamController<PageKey>.broadcast();
   final _zoom = ValueNotifier<double>(1);
   final _findResult = ValueNotifier<FindResult>(FindResult.none);
 
@@ -128,6 +142,10 @@ class CefBrowserView implements BrowserView {
 
   @override
   Future<void> load(String url) => _controller.loadUrl(url);
+  @override
+  void focus() => _controller.requestFocus();
+  @override
+  void setVisible(bool visible) => _controller.setVisible(visible);
   @override
   Future<void> goBack() => _controller.goBack();
   @override
@@ -172,6 +190,10 @@ class CefBrowserView implements BrowserView {
   @override
   Stream<PageContextMenu> get contextMenus => _contextMenus.stream;
   @override
+  Stream<NewTabRequest> get newTabRequests => _newTabs.stream;
+  @override
+  Stream<PageKey> get unhandledKeys => _keys.stream;
+  @override
   Future<void> editCommand(EditCommand command) =>
       _controller.editCommand(command.name);
   @override
@@ -196,6 +218,8 @@ class CefBrowserView implements BrowserView {
   @override
   Future<void> dispose() {
     _contextMenus.close();
+    _newTabs.close();
+    _keys.close();
     _scriptMessages.close();
     return _controller.dispose();
   }

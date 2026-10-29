@@ -6,6 +6,9 @@
 #include <include/cef_base.h>
 
 #include <functional>
+#include <memory>
+#include <mutex>
+#include <vector>
 namespace webview_cef {
     class WebviewTexture{
     public:
@@ -14,6 +17,10 @@ namespace webview_cef {
         virtual void onFrame(const void* buffer, int width, int height){}
         // GPU accelerated frame (shared texture handle from OnAcceleratedPaint).
         virtual void onAcceleratedFrame(const void* sharedHandle, int width, int height, int format){}
+        // 6browser patch: a <select> dropdown (or other popup widget) frame,
+        // to draw over the page at (x, y) pixels; and its closing.
+        virtual void onAcceleratedPopup(const void* sharedHandle, int x, int y){}
+        virtual void hidePopup(){}
         int64_t textureId = 0;
         bool isFocused = false;
         // IME state for THIS browser (a single plugin can host several). The
@@ -46,6 +53,7 @@ namespace webview_cef {
         void imeSetCompositionNative(const std::wstring& text, int cursor);
         void imeCommitTextNative(const std::wstring& text);
         void imeFinishCompositionNative();
+        void imeCancelCompositionNative();
 
     private :
         // Resolve the browserId whose renderer currently has focus, or -1.
@@ -57,7 +65,13 @@ namespace webview_cef {
 	    std::function<std::shared_ptr<WebviewTexture>()> m_createTextureFunc;
         CefRefPtr<WebviewHandler> m_handler;
 	    CefRefPtr<WebviewApp> m_app;
+    	// 6browser patch: written on the platform thread (close) and the CEF UI
+    	// thread (create, frames); always used under m_renderersMutex, and
+    	// callers keep their own reference while they call into a renderer.
     	std::unordered_map<int, std::shared_ptr<WebviewTexture>> m_renderers;
+    	std::mutex m_renderersMutex;
+    	std::shared_ptr<WebviewTexture> rendererFor(int browserId);
+    	std::vector<std::pair<int, std::shared_ptr<WebviewTexture>>> renderersSnapshot();
 	    bool m_init = false;
     };
 

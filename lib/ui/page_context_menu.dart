@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -72,7 +73,7 @@ class _PageContextMenuHostState extends ConsumerState<PageContextMenuHost> {
             PopupMenuItem<PageMenuAction>(
               value: e.action,
               enabled: e.enabled,
-              height: 36,
+              height: 30,
               child: _EntryRow(entry: e),
             ),
       ],
@@ -92,7 +93,20 @@ class _PageContextMenuHostState extends ConsumerState<PageContextMenuHost> {
       case PageMenuAction.reload:
         view.reload();
       case PageMenuAction.openLinkInNewTab:
-        tabs.newTab(url: m.linkUrl, activate: false, incognito: view.incognito);
+        final opener = ref
+            .read(tabsProvider)
+            .tabs
+            .where((t) => identical(t.view, view))
+            .firstOrNull;
+        if (opener != null) {
+          tabs.openFromTab(opener.id, m.linkUrl, background: true);
+        } else {
+          tabs.newTab(
+            url: m.linkUrl,
+            activate: false,
+            incognito: view.incognito,
+          );
+        }
       case PageMenuAction.openLinkInIncognito:
         tabs.newTab(url: m.linkUrl, incognito: true);
       case PageMenuAction.saveLink:
@@ -192,12 +206,12 @@ List<PageMenuEntry?> pageMenuEntries(PageContextMenu m) {
       PageMenuEntry(
         PageMenuAction.openLinkInNewTab,
         'Open link in new tab',
-        icon: Icons.open_in_new,
+        icon: CupertinoIcons.plus_square_on_square,
       ),
       PageMenuEntry(
         PageMenuAction.openLinkInIncognito,
         'Open link in incognito tab',
-        icon: Icons.privacy_tip_outlined,
+        icon: CupertinoIcons.eye_slash,
       ),
     ]);
     sections.add(const [
@@ -205,7 +219,7 @@ List<PageMenuEntry?> pageMenuEntries(PageContextMenu m) {
       PageMenuEntry(
         PageMenuAction.copyLink,
         'Copy link address',
-        icon: Icons.link,
+        icon: CupertinoIcons.link,
       ),
     ]);
   }
@@ -214,12 +228,12 @@ List<PageMenuEntry?> pageMenuEntries(PageContextMenu m) {
       PageMenuEntry(
         PageMenuAction.openImageInNewTab,
         'Open image in new tab',
-        icon: Icons.image_outlined,
+        icon: CupertinoIcons.photo,
       ),
       PageMenuEntry(
         PageMenuAction.saveImage,
         'Save image as...',
-        icon: Icons.download_outlined,
+        icon: CupertinoIcons.arrow_down_circle,
       ),
       PageMenuEntry(PageMenuAction.copyImageAddress, 'Copy image address'),
     ]);
@@ -230,14 +244,14 @@ List<PageMenuEntry?> pageMenuEntries(PageContextMenu m) {
         PageMenuAction.undo,
         'Undo',
         shortcut: 'Ctrl+Z',
-        icon: Icons.undo,
+        icon: CupertinoIcons.arrow_uturn_left,
         enabled: m.canUndo,
       ),
       PageMenuEntry(
         PageMenuAction.redo,
         'Redo',
         shortcut: 'Ctrl+Y',
-        icon: Icons.redo,
+        icon: CupertinoIcons.arrow_uturn_right,
         enabled: m.canRedo,
       ),
     ]);
@@ -246,28 +260,28 @@ List<PageMenuEntry?> pageMenuEntries(PageContextMenu m) {
         PageMenuAction.cut,
         'Cut',
         shortcut: 'Ctrl+X',
-        icon: Icons.content_cut,
+        icon: CupertinoIcons.scissors,
         enabled: m.canCut,
       ),
       PageMenuEntry(
         PageMenuAction.copy,
         'Copy',
         shortcut: 'Ctrl+C',
-        icon: Icons.content_copy,
+        icon: CupertinoIcons.doc_on_doc,
         enabled: m.canCopy,
       ),
       PageMenuEntry(
         PageMenuAction.paste,
         'Paste',
         shortcut: 'Ctrl+V',
-        icon: Icons.content_paste,
+        icon: CupertinoIcons.doc_on_clipboard,
         enabled: m.canPaste,
       ),
       PageMenuEntry(
         PageMenuAction.selectAll,
         'Select all',
         shortcut: 'Ctrl+A',
-        icon: Icons.select_all,
+        icon: CupertinoIcons.selection_pin_in_out,
         enabled: m.canSelectAll,
       ),
     ]);
@@ -280,12 +294,12 @@ List<PageMenuEntry?> pageMenuEntries(PageContextMenu m) {
         PageMenuAction.copy,
         'Copy',
         shortcut: 'Ctrl+C',
-        icon: Icons.content_copy,
+        icon: CupertinoIcons.doc_on_doc,
       ),
       PageMenuEntry(
         PageMenuAction.searchSelection,
         'Search for “$quoted”',
-        icon: Icons.search,
+        icon: CupertinoIcons.search,
       ),
     ]);
   }
@@ -297,14 +311,14 @@ List<PageMenuEntry?> pageMenuEntries(PageContextMenu m) {
         PageMenuAction.back,
         'Back',
         shortcut: 'Alt+Left',
-        icon: Icons.arrow_back,
+        icon: CupertinoIcons.chevron_left,
         enabled: m.canGoBack,
       ),
       PageMenuEntry(
         PageMenuAction.forward,
         'Forward',
         shortcut: 'Alt+Right',
-        icon: Icons.arrow_forward,
+        icon: CupertinoIcons.chevron_right,
         enabled: m.canGoForward,
       ),
     ],
@@ -312,7 +326,7 @@ List<PageMenuEntry?> pageMenuEntries(PageContextMenu m) {
       PageMenuAction.reload,
       'Reload',
       shortcut: 'Ctrl+R',
-      icon: Icons.refresh,
+      icon: CupertinoIcons.arrow_clockwise,
     ),
   ]);
   sections.add([
@@ -320,13 +334,13 @@ List<PageMenuEntry?> pageMenuEntries(PageContextMenu m) {
       const PageMenuEntry(
         PageMenuAction.viewSource,
         'View page source',
-        icon: Icons.code,
+        icon: CupertinoIcons.chevron_left_slash_chevron_right,
       ),
     const PageMenuEntry(
       PageMenuAction.inspect,
       'Inspect',
       shortcut: 'F12',
-      icon: Icons.bug_report_outlined,
+      icon: CupertinoIcons.hammer,
     ),
   ]);
 

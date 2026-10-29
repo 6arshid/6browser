@@ -343,6 +343,121 @@ const _numpadDigits = [
   LogicalKeyboardKey.numpad9,
 ];
 
+/// Shortcuts a page can never take over (as in Chrome): the page sees these
+/// keys too, but the browser always acts on them.
+const reservedCommands = {
+  BrowserCommand.newTab,
+  BrowserCommand.newWindow,
+  BrowserCommand.newIncognitoTab,
+  BrowserCommand.reopenClosedTab,
+  BrowserCommand.closeTab,
+  BrowserCommand.closeWindow,
+  BrowserCommand.nextTab,
+  BrowserCommand.previousTab,
+  BrowserCommand.tab1,
+  BrowserCommand.tab2,
+  BrowserCommand.tab3,
+  BrowserCommand.tab4,
+  BrowserCommand.tab5,
+  BrowserCommand.tab6,
+  BrowserCommand.tab7,
+  BrowserCommand.tab8,
+  BrowserCommand.lastTab,
+  BrowserCommand.moveTabLeft,
+  BrowserCommand.moveTabRight,
+  BrowserCommand.fullscreen,
+};
+
+/// The command for a key the page did not handle ([keyCode] is a Windows
+/// virtual-key code, as CEF reports on every platform), or null.
+BrowserCommand? commandForPageKey(
+  int keyCode, {
+  bool control = false,
+  bool shift = false,
+  bool alt = false,
+  bool meta = false,
+}) {
+  final key =
+      _virtualKeys[keyCode] ??
+      switch (keyCode) {
+        >= 0x41 && <= 0x5A => LogicalKeyboardKey(
+          LogicalKeyboardKey.keyA.keyId + keyCode - 0x41,
+        ),
+        >= 0x30 && <= 0x39 => LogicalKeyboardKey(
+          LogicalKeyboardKey.digit0.keyId + keyCode - 0x30,
+        ),
+        >= 0x60 && <= 0x69 => _numpad[keyCode - 0x60],
+        >= 0x70 && <= 0x7B => _functionKeys[keyCode - 0x70],
+        _ => null,
+      };
+  if (key == null) return null;
+  for (final MapEntry(key: command, value: activators)
+      in browserShortcuts.entries) {
+    for (final a in activators) {
+      if (a.trigger == key &&
+          a.control == control &&
+          a.shift == shift &&
+          a.alt == alt &&
+          a.meta == meta) {
+        return command;
+      }
+    }
+  }
+  return null;
+}
+
+const _virtualKeys = <int, LogicalKeyboardKey>{
+  0x08: LogicalKeyboardKey.backspace,
+  0x09: LogicalKeyboardKey.tab,
+  0x1B: LogicalKeyboardKey.escape,
+  0x21: LogicalKeyboardKey.pageUp,
+  0x22: LogicalKeyboardKey.pageDown,
+  0x24: LogicalKeyboardKey.home,
+  0x25: LogicalKeyboardKey.arrowLeft,
+  0x27: LogicalKeyboardKey.arrowRight,
+  0x2E: LogicalKeyboardKey.delete,
+  0x6B: LogicalKeyboardKey.numpadAdd,
+  0x6D: LogicalKeyboardKey.numpadSubtract,
+  0xBB: LogicalKeyboardKey.equal,
+  0xBD: LogicalKeyboardKey.minus,
+  0xDB: LogicalKeyboardKey.bracketLeft,
+  0xDD: LogicalKeyboardKey.bracketRight,
+  0xA6: LogicalKeyboardKey.browserBack,
+  0xA7: LogicalKeyboardKey.browserForward,
+  0xA8: LogicalKeyboardKey.browserRefresh,
+  0xA9: LogicalKeyboardKey.browserStop,
+  0xAA: LogicalKeyboardKey.browserSearch,
+  0xAC: LogicalKeyboardKey.browserHome,
+};
+
+const _numpad = [
+  LogicalKeyboardKey.numpad0,
+  LogicalKeyboardKey.numpad1,
+  LogicalKeyboardKey.numpad2,
+  LogicalKeyboardKey.numpad3,
+  LogicalKeyboardKey.numpad4,
+  LogicalKeyboardKey.numpad5,
+  LogicalKeyboardKey.numpad6,
+  LogicalKeyboardKey.numpad7,
+  LogicalKeyboardKey.numpad8,
+  LogicalKeyboardKey.numpad9,
+];
+
+const _functionKeys = [
+  LogicalKeyboardKey.f1,
+  LogicalKeyboardKey.f2,
+  LogicalKeyboardKey.f3,
+  LogicalKeyboardKey.f4,
+  LogicalKeyboardKey.f5,
+  LogicalKeyboardKey.f6,
+  LogicalKeyboardKey.f7,
+  LogicalKeyboardKey.f8,
+  LogicalKeyboardKey.f9,
+  LogicalKeyboardKey.f10,
+  LogicalKeyboardKey.f11,
+  LogicalKeyboardKey.f12,
+];
+
 /// "Ctrl+Shift+T" style label for an activator.
 String shortcutLabel(SingleActivator a) {
   final parts = <String>[

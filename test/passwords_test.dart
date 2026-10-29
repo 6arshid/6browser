@@ -1,3 +1,5 @@
+import 'package:browser6/features/passwords/password_prompt.dart';
+
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -312,7 +314,14 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Save password?'), findsOneWidget);
-      expect(find.text('site.test'), findsOneWidget);
+      // The prompt names the site (the address bar shows it too).
+      expect(
+        find.descendant(
+          of: find.byType(SavePasswordPrompt),
+          matching: find.text('site.test'),
+        ),
+        findsOneWidget,
+      );
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
       expect(find.text('Save password?'), findsNothing);

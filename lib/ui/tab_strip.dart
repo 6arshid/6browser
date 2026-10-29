@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -8,16 +9,15 @@ import '../features/tabs/url_input.dart';
 import 'browser_theme.dart';
 import 'favicon.dart';
 
-const _pinnedWidth = 48.0;
+const _pinnedWidth = 44.0;
 const _minTabWidth = 44.0;
-const _maxTabWidth = 240.0;
+const _maxTabWidth = 232.0;
+const _tabGap = 2.0;
+const stripHeight = 40.0;
 
-/// Width of the curve that joins the selected tab to the toolbar.
-const _flare = 8.0;
-const stripHeight = 42.0;
-
-/// Desktop tab strip, Chrome style: the selected tab merges into the
-/// toolbar; tabs are reorderable and shrink as more are opened.
+/// Desktop tab strip in Safari's style: tabs are rounded cards on the window
+/// frame, the selected one raised with a soft shadow. Tabs are reorderable
+/// and shrink as more are opened.
 class TabStrip extends ConsumerWidget {
   const TabStrip({super.key});
 
@@ -39,30 +39,25 @@ class TabStrip extends ConsumerWidget {
                 fit: BoxFit.none,
               ),
       ),
+      padding: const EdgeInsets.fromLTRB(6, 5, 6, 3),
       child: LayoutBuilder(
         builder: (context, box) {
           final unpinned = state.tabs.length - state.pinnedCount;
-          // Logo, new-tab button and the list's side padding.
+          // New-tab button and gaps.
           final free =
               box.maxWidth -
               40 -
-              44 -
-              2 * _flare -
+              state.tabs.length * _tabGap -
               state.pinnedCount * _pinnedWidth;
           final width = unpinned == 0
               ? _maxTabWidth
               : (free / unpinned).clamp(_minTabWidth, _maxTabWidth);
           return Row(
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 4, 6, 0),
-                child: Image.asset('assets/logo.png', width: 22, height: 22),
-              ),
               Flexible(
                 child: ReorderableListView(
                   scrollDirection: Axis.horizontal,
                   shrinkWrap: true,
-                  padding: const EdgeInsets.symmetric(horizontal: _flare),
                   clipBehavior: Clip.none,
                   buildDefaultDragHandles: false,
                   onReorderItem: ctl.reorder,
@@ -73,31 +68,30 @@ class TabStrip extends ConsumerWidget {
                       ReorderableDragStartListener(
                         key: ValueKey(state.tabs[i].id),
                         index: i,
-                        child: SizedBox(
-                          width: state.tabs[i].pinned ? _pinnedWidth : width,
-                          child: TabChip(
-                            tab: state.tabs[i],
-                            selected: state.tabs[i].id == state.activeId,
-                            showSeparator:
-                                i < state.tabs.length - 1 &&
-                                state.tabs[i].id != state.activeId &&
-                                state.tabs[i + 1].id != state.activeId,
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: _tabGap),
+                          child: SizedBox(
+                            width: state.tabs[i].pinned ? _pinnedWidth : width,
+                            child: TabChip(
+                              tab: state.tabs[i],
+                              selected: state.tabs[i].id == state.activeId,
+                              showSeparator:
+                                  i < state.tabs.length - 1 &&
+                                  state.tabs[i].id != state.activeId &&
+                                  state.tabs[i + 1].id != state.activeId,
+                            ),
                           ),
                         ),
                       ),
                   ],
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: IconButton(
-                  tooltip: 'New tab (Ctrl+T)',
-                  iconSize: 20,
-                  visualDensity: VisualDensity.compact,
-                  color: colors.tabBackgroundText,
-                  icon: const Icon(Icons.add),
-                  onPressed: ctl.newTab,
-                ),
+              const SizedBox(width: 2),
+              _StripButton(
+                tooltip: 'New tab (Ctrl+T)',
+                icon: CupertinoIcons.add,
+                color: colors.tabBackgroundText,
+                onPressed: ctl.newTab,
               ),
             ],
           );
@@ -105,6 +99,32 @@ class TabStrip extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// A small square button on the tab strip.
+class _StripButton extends StatelessWidget {
+  const _StripButton({
+    required this.tooltip,
+    required this.icon,
+    required this.color,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    tooltip: tooltip,
+    iconSize: 17,
+    color: color,
+    padding: EdgeInsets.zero,
+    constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+    icon: Icon(icon),
+    onPressed: onPressed,
+  );
 }
 
 /// One tab: favicon or spinner, title, close button and a context menu.
@@ -139,12 +159,14 @@ class _TabChipState extends ConsumerState<TabChip> {
     final selected = widget.selected;
     // The selected tab takes the toolbar's color, which is dark for private
     // tabs.
+    final palette = incognito && selected ? BrowserColors.incognito : themed;
+    final text = selected ? palette.tabText : themed.tabBackgroundText;
+    final brightness = ThemeData.estimateBrightnessForColor(themed.frame);
     final fill = selected
-        ? (incognito ? BrowserColors.incognito.toolbar : themed.toolbar)
-        : null;
-    final text = selected
-        ? (incognito ? BrowserColors.incognito.tabText : themed.tabText)
-        : themed.tabBackgroundText;
+        ? palette.toolbar
+        : _hover
+        ? themed.tabText.withValues(alpha: 0.06)
+        : Colors.transparent;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
@@ -153,58 +175,82 @@ class _TabChipState extends ConsumerState<TabChip> {
         onTap: () => ctl.select(tab.id),
         onTertiaryTapUp: (_) => ctl.close(tab.id),
         onSecondaryTapUp: (d) => _menu(context, ctl, d.globalPosition),
-        child: CustomPaint(
-          painter: _TabPainter(
-            fill: fill,
-            hover: !selected && _hover
-                ? themed.tabBackgroundText.withValues(alpha: 0.10)
-                : null,
-            separator: widget.showSeparator && !_hover
-                ? themed.separator
-                : null,
-          ),
-          child: Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: ListenableBuilder(
-              listenable: Listenable.merge([
-                tab.view.title,
-                tab.view.url,
-                tab.view.isLoading,
-              ]),
-              builder: (context, _) => Tooltip(
-                message: tabTitle(tab.view),
-                waitDuration: const Duration(milliseconds: 700),
-                child: LayoutBuilder(
-                  builder: (context, box) =>
-                      _content(ctl, text, iconOnly: box.maxWidth < 72),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            AnimatedContainer(
+              duration: Ui.fast,
+              curve: Ui.curve,
+              decoration: BoxDecoration(
+                color: fill,
+                borderRadius: BorderRadius.circular(Ui.radius),
+                boxShadow: selected
+                    ? Ui.shadow(brightness, strength: 0.5)
+                    : null,
+                border: selected
+                    ? Border.all(
+                        color: themed.separator.withValues(alpha: 0.06),
+                        width: 0.5,
+                      )
+                    : null,
+              ),
+              child: ListenableBuilder(
+                listenable: Listenable.merge([
+                  tab.view.title,
+                  tab.view.url,
+                  tab.view.isLoading,
+                ]),
+                builder: (context, _) => Tooltip(
+                  message: tabTitle(tab.view),
+                  waitDuration: const Duration(milliseconds: 800),
+                  child: LayoutBuilder(
+                    builder: (context, box) => _content(
+                      ctl,
+                      text,
+                      selected: selected,
+                      iconOnly: box.maxWidth < 72,
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
+            if (widget.showSeparator && !_hover)
+              Positioned(
+                right: -_tabGap / 2 - 0.5,
+                top: 9,
+                bottom: 9,
+                child: Container(width: 1, color: themed.separator),
+              ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _content(TabsController ctl, Color text, {required bool iconOnly}) {
+  Widget _content(
+    TabsController ctl,
+    Color text, {
+    required bool selected,
+    required bool iconOnly,
+  }) {
     final view = tab.view;
     final Widget icon = view.isLoading.value
         ? SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(strokeWidth: 2, color: text),
+            width: 13,
+            height: 13,
+            child: CircularProgressIndicator(strokeWidth: 1.6, color: text),
           )
         : view.incognito
-        ? Icon(Icons.visibility_off, size: 16, color: text)
+        ? Icon(CupertinoIcons.eye_slash, size: 15, color: text)
         : Favicon(url: view.url.value, color: text);
     if (tab.pinned || iconOnly) {
       // Very narrow tabs show only the icon; close stays reachable through
       // middle-click and the context menu.
       return Center(child: icon);
     }
-    final showClose = widget.selected || _hover;
+    final showClose = selected || _hover;
     return Padding(
-      padding: const EdgeInsets.only(left: 12, right: 6),
+      padding: const EdgeInsets.only(left: 10, right: 4),
       child: Row(
         children: [
           icon,
@@ -214,7 +260,7 @@ class _TabChipState extends ConsumerState<TabChip> {
               // Fade the end of long titles instead of an ellipsis.
               shaderCallback: (r) => LinearGradient(
                 colors: const [Colors.white, Colors.white, Colors.transparent],
-                stops: [0, ((r.width - 24) / r.width).clamp(0.0, 1.0), 1],
+                stops: [0, ((r.width - 20) / r.width).clamp(0.0, 1.0), 1],
               ).createShader(r),
               blendMode: BlendMode.dstIn,
               child: Text(
@@ -222,23 +268,37 @@ class _TabChipState extends ConsumerState<TabChip> {
                 maxLines: 1,
                 softWrap: false,
                 overflow: TextOverflow.clip,
-                style: TextStyle(fontSize: 12.5, color: text),
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: text,
+                  fontWeight: selected ? FontWeight.w500 : FontWeight.w400,
+                ),
               ),
             ),
           ),
-          SizedBox(
-            width: 22,
-            height: 22,
-            child: showClose
-                ? IconButton(
-                    tooltip: 'Close tab (Ctrl+W)',
-                    padding: EdgeInsets.zero,
-                    iconSize: 14,
-                    color: text,
-                    icon: const Icon(Icons.close),
-                    onPressed: () => ctl.close(tab.id),
-                  )
-                : null,
+          AnimatedOpacity(
+            duration: Ui.fast,
+            opacity: showClose ? 1 : 0,
+            child: IgnorePointer(
+              ignoring: !showClose,
+              child: IconButton(
+                tooltip: 'Close tab (Ctrl+W)',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 20,
+                  height: 20,
+                ),
+                style: IconButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                ),
+                iconSize: 11,
+                color: text,
+                icon: const Icon(CupertinoIcons.xmark),
+                onPressed: () => ctl.close(tab.id),
+              ),
+            ),
           ),
         ],
       ),
@@ -253,10 +313,10 @@ class _TabChipState extends ConsumerState<TabChip> {
     PopupMenuItem<String> item(String value, IconData icon, String label) =>
         PopupMenuItem(
           value: value,
-          height: 40,
+          height: 32,
           child: Row(
             children: [
-              Icon(icon, size: 18),
+              Icon(icon, size: 16),
               const SizedBox(width: 12),
               Text(label),
             ],
@@ -266,18 +326,18 @@ class _TabChipState extends ConsumerState<TabChip> {
       context: context,
       position: RelativeRect.fromLTRB(at.dx, at.dy, at.dx, at.dy),
       items: [
-        item('new', Icons.add, 'New tab'),
+        item('new', CupertinoIcons.add, 'New tab'),
         const PopupMenuDivider(),
-        item('reload', Icons.refresh, 'Reload'),
-        item('dup', Icons.copy_all_outlined, 'Duplicate'),
+        item('reload', CupertinoIcons.arrow_clockwise, 'Reload'),
+        item('dup', CupertinoIcons.square_on_square, 'Duplicate'),
         item(
           'pin',
-          tab.pinned ? Icons.push_pin : Icons.push_pin_outlined,
+          tab.pinned ? CupertinoIcons.pin_fill : CupertinoIcons.pin,
           tab.pinned ? 'Unpin' : 'Pin',
         ),
         const PopupMenuDivider(),
-        item('close', Icons.close, 'Close'),
-        item('others', Icons.tab_unselected, 'Close other tabs'),
+        item('close', CupertinoIcons.xmark, 'Close'),
+        item('others', CupertinoIcons.xmark_square, 'Close other tabs'),
       ],
     );
     switch (choice) {
@@ -297,65 +357,6 @@ class _TabChipState extends ConsumerState<TabChip> {
         }
     }
   }
-}
-
-/// Selected tab: rounded top corners and outward curves at the bottom that
-/// join the toolbar. Unselected tabs: a hover pill and a divider.
-class _TabPainter extends CustomPainter {
-  const _TabPainter({this.fill, this.hover, this.separator});
-
-  final Color? fill;
-  final Color? hover;
-  final Color? separator;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    const top = 6.0;
-    const r = 8.0;
-    final w = size.width;
-    final h = size.height;
-    if (fill != null) {
-      final path = Path()
-        ..moveTo(-_flare, h)
-        ..arcToPoint(
-          Offset(0, h - _flare),
-          radius: const Radius.circular(_flare),
-          clockwise: false,
-        )
-        ..lineTo(0, top + r)
-        ..arcToPoint(Offset(r, top), radius: const Radius.circular(r))
-        ..lineTo(w - r, top)
-        ..arcToPoint(Offset(w, top + r), radius: const Radius.circular(r))
-        ..lineTo(w, h - _flare)
-        ..arcToPoint(
-          Offset(w + _flare, h),
-          radius: const Radius.circular(_flare),
-          clockwise: false,
-        )
-        ..close();
-      canvas.drawPath(path, Paint()..color = fill!);
-      return;
-    }
-    if (hover != null) {
-      canvas.drawRRect(
-        RRect.fromLTRBR(2, top + 2, w - 2, h - 4, const Radius.circular(8)),
-        Paint()..color = hover!,
-      );
-    }
-    if (separator != null) {
-      canvas.drawLine(
-        Offset(w - 0.5, top + 9),
-        Offset(w - 0.5, h - 9),
-        Paint()
-          ..color = separator!
-          ..strokeWidth = 1,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(_TabPainter old) =>
-      old.fill != fill || old.hover != hover || old.separator != separator;
 }
 
 /// Title shown for a tab; blank pages and the New Tab page read "New tab".

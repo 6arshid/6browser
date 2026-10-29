@@ -2,9 +2,43 @@
 const defaultSearchTemplate = 'https://www.google.com/search?q=%s';
 
 final _scheme = RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]*://');
-final _hostLike = RegExp(
-  r'^(localhost|[\w-]+(\.[\w-]+)+|\d{1,3}(\.\d{1,3}){3})(:\d+)?([/?#].*)?$',
+
+/// Schemes that are typed without `//`.
+const _bareSchemes = ['about:', 'view-source:', 'data:', 'mailto:', 'chrome:'];
+
+// A host and optional port, path, query or fragment. Labels may be in any
+// script (IDN hosts such as ایران.ir); the top-level domain must be letters,
+// so "v2.0" and "1.5" stay searches.
+final _domain = RegExp(
+  r'^[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*\.(\p{L}{2,63}|xn--[a-z0-9-]+)\.?(?::\d{1,5})?(?:[/?#].*)?$',
+  unicode: true,
 );
+final _ipHost = RegExp(
+  r'^(?:\d{1,3}(?:\.\d{1,3}){3}|\[[0-9a-fA-F:.]+\])(?::\d{1,5})?(?:[/?#].*)?$',
+);
+// localhost, or an intranet name followed by a port or a path ("nas:5000",
+// "router/admin"), as Chrome treats them.
+final _intranet = RegExp(
+  r'^(?:localhost|[\p{L}\p{N}_-]+(?::\d{1,5}(?:[/?#].*)?|[/?#].*))$',
+  unicode: true,
+);
+final _windowsPath = RegExp(r'^(?:[a-zA-Z]:[\\/]|\\\\[^\\])');
+
+/// File names typed alone ("index.html", "node.js") are searches: these are
+/// not top-level domains.
+const _notTopLevelDomains = {
+  'js', 'ts', 'html', 'htm', 'php', 'css', 'json', 'txt', 'py', 'exe', //
+  'dll', 'jpg', 'jpeg', 'png', 'gif', 'pdf', 'doc', 'docx', 'xls', 'xlsx',
+  'ppt', 'pptx', 'mp3', 'mp4', 'cpp', 'java', 'dart', 'yaml', 'yml', 'xml',
+};
+
+bool _looksLikeHost(String text) {
+  if (_ipHost.hasMatch(text) || _intranet.hasMatch(text)) return true;
+  final match = _domain.firstMatch(text);
+  if (match == null) return false;
+  // "index.html" alone is a file name; "example.com/index.html" is a URL.
+  return !_notTopLevelDomains.contains(match.group(1)!.toLowerCase());
+}
 
 /// Turns whatever the user typed in the address bar into a loadable URL:
 /// full URLs pass through, host-like text gets `http://`, anything else
@@ -20,8 +54,15 @@ String resolveInput(
 }) {
   final text = input.trim();
   if (text.isEmpty) return 'about:blank';
-  if (_scheme.hasMatch(text) || text.startsWith('about:')) return text;
-  if (!text.contains(' ') && _hostLike.hasMatch(text)) return 'http://$text';
+  if (_scheme.hasMatch(text)) return text;
+  final lower = text.toLowerCase();
+  if (_bareSchemes.any(lower.startsWith)) return text;
+  if (_windowsPath.hasMatch(text)) {
+    return Uri.file(text, windows: true).toString();
+  }
+  if (!text.contains(RegExp(r'\s')) && _looksLikeHost(text)) {
+    return 'http://$text';
+  }
   return searchTemplate.replaceAll('%s', Uri.encodeQueryComponent(text));
 }
 
