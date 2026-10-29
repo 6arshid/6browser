@@ -258,6 +258,17 @@ void WebviewApp::OnBeforeCommandLineProcessing(const CefString &process_type, Ce
         {
             command_line->AppendSwitch("remote-debugging-pipe");
             command_line->AppendSwitchWithValue("remote-debugging-io-pipes", m_devToolsPipes);
+
+            // Chromium treats --remote-debugging-pipe as automation and makes
+            // navigator.webdriver true in every page. The pipe is only ours,
+            // pages are never automated, so report it the way Chrome does
+            // (false). Google sign-in refuses a "webdriver" browser.
+            std::string blink = command_line->GetSwitchValue("disable-blink-features");
+            if (blink.find("AutomationControlled") == size_t(-1))
+            {
+                blink += blink.empty() ? "AutomationControlled" : ",AutomationControlled";
+            }
+            command_line->AppendSwitchWithValue("disable-blink-features", blink);
         }
         // 6browser patch: upstream's "ignore-certificate-errors" for a filter
         // domain is removed; TLS errors must never be silently ignored.
