@@ -114,9 +114,39 @@ class AndroidBrowserView implements BrowserView {
       debugPrint('Screen sharing setup failed: ${error.message}');
     }
     if (_disposed) return;
+    try {
+      _listenForExternalLinks();
+      await _app.invokeMethod<void>('installExternalLinks', {
+        'webViewId': _webViewId,
+      });
+      _byWebViewId[_webViewId] = this;
+    } on PlatformException catch (error) {
+      debugPrint('External link setup failed: ${error.message}');
+    }
+    if (_disposed) return;
     await load(initialUrl);
     if (!_disposed) _isReady.value = true;
   }
+
+  // Links to other apps (tel:, sms:, mailto:, whatsapp:...) arrive from
+  // MainActivity on the app channel, tagged with their WebView.
+  static final _byWebViewId = <int, AndroidBrowserView>{};
+  static var _listening = false;
+
+  static void _listenForExternalLinks() {
+    if (_listening) return;
+    _listening = true;
+    _app.setMethodCallHandler((call) async {
+      if (call.method != 'externalLink') return;
+      final args = call.arguments as Map;
+      final view = _byWebViewId[(args['webViewId'] as num).toInt()];
+      view?._externalLinks.add(
+        ExternalLinkRequest(args['url'] as String, source: view._url.value),
+      );
+    });
+  }
+
+  final _externalLinks = StreamController<ExternalLinkRequest>.broadcast();
 
   Future<void> _stopScreenShare() async {
     await _app.invokeMethod<void>('stopScreenShare', {'webViewId': _webViewId});
@@ -196,7 +226,13 @@ class AndroidBrowserView implements BrowserView {
   }
 
   @override
-  Future<void> load(String url) {
+  Future<void> load(String url) async {
+    // A typed or bookmarked app link (tel:, mailto:...) never reaches the
+    // WebView's link handling, which would only show an error page.
+    if (_isAppLink(url)) {
+      _externalLinks.add(ExternalLinkRequest(url));
+      return;
+    }
     final upgraded = httpsUpgradeOf(url);
     _httpsAttempt = upgraded;
     _httpFallback = upgraded == null ? null : url;
@@ -255,6 +291,8 @@ class AndroidBrowserView implements BrowserView {
   @override
   Stream<NewTabRequest> get newTabRequests => const Stream.empty();
   @override
+  Stream<ExternalLinkRequest> get externalLinks => _externalLinks.stream;
+  @override
   Stream<PageKey> get unhandledKeys => const Stream.empty();
   @override
   void focus() {}
@@ -286,13 +324,27 @@ class AndroidBrowserView implements BrowserView {
   @override
   Future<void> dispose() async {
     _disposed = true;
+    _byWebViewId.removeWhere((_, v) => identical(v, this));
     _scriptMessages.close();
+    _externalLinks.close();
     await _stopScreenShare();
     if (incognito) {
       await _controller.clearCache();
       await _controller.clearLocalStorage();
     }
   }
+}
+
+final _appLinkScheme = RegExp(r'^([a-zA-Z][a-zA-Z0-9+.-]*):');
+
+/// Schemes the WebView loads itself (as in MainActivity's ExternalLinks).
+const _webSchemes = {
+  'http', 'https', 'about', 'data', 'blob', 'javascript', 'file', 'content', //
+};
+
+bool _isAppLink(String url) {
+  final scheme = _appLinkScheme.firstMatch(url)?.group(1)?.toLowerCase();
+  return scheme != null && !_webSchemes.contains(scheme);
 }
 
 /// A listenable that never changes.

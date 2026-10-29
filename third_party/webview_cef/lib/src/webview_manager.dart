@@ -185,6 +185,12 @@ class WebviewManager extends ValueNotifier<bool> {
             call.arguments['url'] as String,
             call.arguments['disposition'] as int);
         return;
+      case 'onExternalLink':
+        int browserId = call.arguments['browserId'] as int;
+        _webViews[browserId]?.listener?.onExternalLink?.call(
+            call.arguments['url'] as String,
+            call.arguments['source'] as String);
+        return;
       case 'onZoomChanged':
         int browserId = call.arguments['browserId'] as int;
         _webViews[browserId]

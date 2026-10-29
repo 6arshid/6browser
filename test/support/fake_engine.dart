@@ -79,6 +79,11 @@ class FakeView implements BrowserView {
   final newTabController = StreamController<NewTabRequest>.broadcast();
   @override
   Stream<NewTabRequest> get newTabRequests => newTabController.stream;
+  final externalLinkController =
+      StreamController<ExternalLinkRequest>.broadcast();
+  @override
+  Stream<ExternalLinkRequest> get externalLinks =>
+      externalLinkController.stream;
   final unhandledKeyController = StreamController<PageKey>.broadcast();
   @override
   Stream<PageKey> get unhandledKeys => unhandledKeyController.stream;

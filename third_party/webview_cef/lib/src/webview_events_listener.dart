@@ -68,6 +68,11 @@ typedef ZoomChangedCb = void Function(double level);
 /// [disposition] is a cef_window_open_disposition_t (see [cefNewBackgroundTab]).
 typedef NewWindowCb = void Function(String url, int disposition);
 
+/// 6browser patch: the page tried to open a link that belongs to another app
+/// (mailto:, tg:...); the navigation was cancelled. [source] is the URL of
+/// the page that asked, empty when the user typed the link.
+typedef ExternalLinkCb = void Function(String url, String source);
+
 /// 6browser patch: a key press the page did not handle: Windows virtual key
 /// code and CEF event flags (eventFlagControlDown and so on).
 typedef UnhandledKeyCb = void Function(int keyCode, int modifiers);
@@ -85,6 +90,7 @@ class WebviewEventsListener {
   FindResultCb? onFindResult;
   ZoomChangedCb? onZoomChanged;
   NewWindowCb? onNewWindow;
+  ExternalLinkCb? onExternalLink;
   UnhandledKeyCb? onUnhandledKey;
 
   WebviewEventsListener({
@@ -97,6 +103,7 @@ class WebviewEventsListener {
     this.onFindResult,
     this.onZoomChanged,
     this.onNewWindow,
+    this.onExternalLink,
     this.onUnhandledKey,
   });
 }

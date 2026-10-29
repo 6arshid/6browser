@@ -439,6 +439,25 @@ namespace webview_cef {
                 }
             };
 
+            m_handler->onExternalLinkEvent = [=, this](int nBrowserId, std::string url, std::string source)
+            {
+                if (m_invokeFunc)
+                {
+                    WValue* retMap = webview_value_new_map();
+                    WValue* bId = webview_value_new_int(nBrowserId);
+                    WValue* u = webview_value_new_string(const_cast<char*>(url.c_str()));
+                    WValue* s = webview_value_new_string(const_cast<char*>(source.c_str()));
+                    webview_value_set_string(retMap, "browserId", bId);
+                    webview_value_set_string(retMap, "url", u);
+                    webview_value_set_string(retMap, "source", s);
+                    m_invokeFunc("onExternalLink", retMap);
+                    webview_value_unref(bId);
+                    webview_value_unref(u);
+                    webview_value_unref(s);
+                    webview_value_unref(retMap);
+                }
+            };
+
 			{
 				std::lock_guard<std::mutex> lock(devToolsMutex);
 				devToolsSink = [=, this](const std::string& message) {
@@ -472,6 +491,7 @@ namespace webview_cef {
 		m_handler->onFindResultEvent = nullptr;
 		m_handler->onZoomChangedEvent = nullptr;
 		m_handler->onNewWindowEvent = nullptr;
+		m_handler->onExternalLinkEvent = nullptr;
 		m_handler->onUnhandledKeyEvent = nullptr;
 		{
 			std::lock_guard<std::mutex> lock(devToolsMutex);

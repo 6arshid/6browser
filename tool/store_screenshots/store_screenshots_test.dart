@@ -101,6 +101,8 @@ class ShotView implements BrowserView {
   @override
   Stream<NewTabRequest> get newTabRequests => const Stream.empty();
   @override
+  Stream<ExternalLinkRequest> get externalLinks => const Stream.empty();
+  @override
   Stream<PageKey> get unhandledKeys => const Stream.empty();
   @override
   void focus() {}

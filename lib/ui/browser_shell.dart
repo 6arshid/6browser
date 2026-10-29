@@ -12,6 +12,7 @@ import '../engine/browser_engine.dart';
 
 import '../features/bookmarks/bookmarks_page.dart';
 import '../features/downloads/downloads_page.dart';
+import '../features/external_links/external_link_prompt.dart';
 import '../features/history/history_page.dart';
 import '../features/new_tab/new_tab_page.dart';
 import '../features/passwords/password_prompt.dart';
@@ -401,48 +402,55 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
                                           // Saves and fills passwords.
                                           child: PasswordHost(
                                             view: t.view,
-                                            child: Stack(
-                                              fit: StackFit.expand,
-                                              children: [
-                                                ValueListenableBuilder<bool>(
-                                                  valueListenable:
-                                                      t.view.isReady,
-                                                  builder: (_, ready, _) =>
-                                                      ready
-                                                      // Pages without a background
-                                                      // draw on white, as in Chrome
-                                                      // (the engine leaves them
-                                                      // transparent).
-                                                      ? ColoredBox(
-                                                          color: Colors.white,
-                                                          child:
-                                                              PageContextMenuHost(
+                                            // Opens mailto:, tg:... in apps.
+                                            child: ExternalLinkHost(
+                                              view: t.view,
+                                              child: Stack(
+                                                fit: StackFit.expand,
+                                                children: [
+                                                  ValueListenableBuilder<bool>(
+                                                    valueListenable:
+                                                        t.view.isReady,
+                                                    builder: (_, ready, _) =>
+                                                        ready
+                                                        // Pages without a background
+                                                        // draw on white, as in Chrome
+                                                        // (the engine leaves them
+                                                        // transparent).
+                                                        ? ColoredBox(
+                                                            color: Colors.white,
+                                                            child: PageContextMenuHost(
+                                                              view: t.view,
+                                                              child: _PageKeys(
                                                                 view: t.view,
-                                                                child: _PageKeys(
-                                                                  view: t.view,
-                                                                  onKey:
-                                                                      _onPageKey,
-                                                                  child: t
-                                                                      .view
-                                                                      .widget,
-                                                                ),
+                                                                onKey:
+                                                                    _onPageKey,
+                                                                child: t
+                                                                    .view
+                                                                    .widget,
                                                               ),
-                                                        )
-                                                      : const Center(
-                                                          child:
-                                                              CircularProgressIndicator(),
-                                                        ),
-                                                ),
-                                                // The New Tab page covers the engine's
-                                                // blank page; the view stays alive below.
-                                                ValueListenableBuilder<String>(
-                                                  valueListenable: t.view.url,
-                                                  builder: (_, url, _) =>
-                                                      isNewTabUrl(url)
-                                                      ? NewTabPage(view: t.view)
-                                                      : const SizedBox.shrink(),
-                                                ),
-                                              ],
+                                                            ),
+                                                          )
+                                                        : const Center(
+                                                            child:
+                                                                CircularProgressIndicator(),
+                                                          ),
+                                                  ),
+                                                  // The New Tab page covers the engine's
+                                                  // blank page; the view stays alive below.
+                                                  ValueListenableBuilder<
+                                                    String
+                                                  >(
+                                                    valueListenable: t.view.url,
+                                                    builder: (_, url, _) =>
+                                                        isNewTabUrl(url)
+                                                        ? NewTabPage(
+                                                            view: t.view,
+                                                          )
+                                                        : const SizedBox.shrink(),
+                                                  ),
+                                                ],
+                                              ),
                                             ),
                                           ),
                                         ),

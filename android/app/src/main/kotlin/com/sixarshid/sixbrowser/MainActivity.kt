@@ -24,9 +24,21 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "6browser/app")
-            .setMethodCallHandler { call, result ->
+        val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "6browser/app")
+        channel.setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "installExternalLinks" -> {
+                        val id = call.argument<Number>("webViewId")?.toLong()
+                        val view = id?.let { WebViewFlutterAndroidExternalApi.getWebView(flutterEngine, it) }
+                        if (view == null) result.error("NO_WEBVIEW", "WebView is unavailable", null)
+                        else {
+                            ExternalLinks.install(view) { url ->
+                                channel.invokeMethod("externalLink", mapOf("webViewId" to id, "url" to url))
+                            }
+                            result.success(null)
+                        }
+                    }
+                    "openExternal" -> result.success(ExternalLinks.open(this, call.arguments as String))
                     "installScreenShare" -> {
                         val id = call.argument<Number>("webViewId")?.toLong()
                         val view = id?.let { WebViewFlutterAndroidExternalApi.getWebView(flutterEngine, it) }

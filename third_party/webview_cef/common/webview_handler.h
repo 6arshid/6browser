@@ -46,6 +46,9 @@ struct browser_info{
     CefRect popup_rect;
     // 6browser patch: when the page's renderer last crashed.
     std::chrono::steady_clock::time_point last_crash;
+    // 6browser patch: the page may hand one link to an external app until
+    // the user next clicks or types (Chrome's flood guard).
+    bool external_link_allowed = true;
 };
 
 // 6browser patch: what was under the cursor when a context menu was requested.
@@ -108,6 +111,11 @@ public:
     // 6browser patch: a link or script asked for a new tab/window
     // (cef_window_open_disposition_t); the host opens it as a tab.
     std::function<void(int browserId, std::string url, int disposition)> onNewWindowEvent;
+    // 6browser patch: the page tried to open a link that belongs to another
+    // app (mailto:, tg:...). The navigation is cancelled; the host asks the
+    // user and opens it. |source| is the URL of the page that asked, empty
+    // when the user typed the link.
+    std::function<void(int browserId, std::string url, std::string source)> onExternalLinkEvent;
     // 6browser patch: a key press the page did not handle (Windows virtual
     // key code, CEF modifier flags), for the host's shortcuts.
     std::function<void(int browserId, int keyCode, int modifiers)> onUnhandledKeyEvent;
@@ -178,6 +186,13 @@ public:
                           const CefString& target_url,
                           CefRequestHandler::WindowOpenDisposition target_disposition,
                           bool user_gesture) override;
+    // 6browser patch: links to other apps go to the host instead of ending
+    // on an ERR_UNKNOWN_URL_SCHEME page.
+    bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
+                        CefRefPtr<CefFrame> frame,
+                        CefRefPtr<CefRequest> request,
+                        bool user_gesture,
+                        bool is_redirect) override;
     void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser,
                                    TerminationStatus status,
                                    int error_code,
@@ -285,6 +300,8 @@ public:
     void setVisible(int browserId, bool visible);
     void openInNewTab(CefRefPtr<CefBrowser> browser, const CefString& url,
                       int disposition, bool user_gesture);
+    void offerExternalLink(CefRefPtr<CefBrowser> browser, const std::string& url,
+                           const std::string& source);
     void changeSize(int browserId, float a_dpi, int width, int height);
     // |button|: 0 left, 1 middle, 2 right (cef_mouse_button_type_t).
     void cursorClick(int browserId, int x, int y, bool up, int button = 0, int clickCount = 1, int modifiers = 0);

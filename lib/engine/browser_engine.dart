@@ -73,6 +73,11 @@ abstract class BrowserView {
   /// middle clicks. Backends that open such links in place never emit.
   Stream<NewTabRequest> get newTabRequests;
 
+  /// Links to other apps (mailto:, tg:, zoommtg:...) the page tried to open.
+  /// The page stays as it was; the app asks the user and hands the link to
+  /// the system. Backends that cannot catch such links never emit.
+  Stream<ExternalLinkRequest> get externalLinks;
+
   /// Key presses the page did not handle, so browser shortcuts that pages
   /// may claim (Ctrl+F, Ctrl+K...) run only when the page leaves them.
   /// Backends whose keys never reach the page first never emit.
@@ -129,6 +134,15 @@ class NewTabRequest {
 
   final String url;
   final bool background;
+}
+
+/// A page asked to open [url], a link that belongs to another app.
+/// [source] is the URL of that page; empty when the user typed the link.
+class ExternalLinkRequest {
+  const ExternalLinkRequest(this.url, {this.source = ''});
+
+  final String url;
+  final String source;
 }
 
 /// Find-in-page progress: match [active] (1-based) of [count].

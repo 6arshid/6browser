@@ -421,10 +421,66 @@ bool WebviewHandler::OnOpenURLFromTab(CefRefPtr<CefBrowser> browser,
     }
 }
 
+namespace {
+// Schemes Chromium loads itself. Any other scheme belongs to an app on the
+// computer (mailto:, tg:, zoommtg:...), which Chromium cannot open.
+bool IsExternalLink(const std::string& url) {
+    static const char* const kWebSchemes[] = {
+        "http", "https", "file", "data", "blob", "filesystem", "about",
+        "javascript", "ws", "wss", "chrome", "chrome-extension",
+        "chrome-untrusted", "chrome-error", "chrome-search", "devtools",
+        "view-source", "isolated-app",
+    };
+    const size_t colon = url.find(':');
+    if (colon == 0 || colon == std::string::npos) return false;
+    std::string scheme = url.substr(0, colon);
+    for (char& c : scheme) {
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        const bool valid = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+                           c == '+' || c == '-' || c == '.';
+        if (!valid) return false;
+    }
+    for (const char* web : kWebSchemes) {
+        if (scheme == web) return false;
+    }
+    return true;
+}
+}  // namespace
+
+bool WebviewHandler::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
+                                    CefRefPtr<CefFrame> frame,
+                                    CefRefPtr<CefRequest> request,
+                                    bool user_gesture,
+                                    bool is_redirect) {
+    const std::string url = request->GetURL().ToString();
+    if (!IsExternalLink(url)) return false;
+    // Cancelling keeps the page as it is, as in Chrome. A typed (or
+    // bookmarked) link was not asked for by the page on screen.
+    const bool typed = (request->GetTransitionType() & TT_SOURCE_MASK) == TT_EXPLICIT;
+    offerExternalLink(browser, url, typed ? "" : frame->GetURL().ToString());
+    return true;
+}
+
+// Like Chrome, a page gets one external link until the user next clicks or
+// types, so a script cannot keep launching apps or prompts.
+void WebviewHandler::offerExternalLink(CefRefPtr<CefBrowser> browser, const std::string& url,
+                                       const std::string& source) {
+    auto it = browser_map_.find(browser->GetIdentifier());
+    if (it == browser_map_.end() || !it->second.external_link_allowed) return;
+    it->second.external_link_allowed = false;
+    if (onExternalLinkEvent) onExternalLinkEvent(browser->GetIdentifier(), url, source);
+}
+
 void WebviewHandler::openInNewTab(CefRefPtr<CefBrowser> browser, const CefString& url,
                                   int disposition, bool user_gesture) {
     const std::string target = url.ToString();
     if (!user_gesture || target.empty()) return;
+    // target=_blank links to apps would leave an empty tab behind.
+    if (IsExternalLink(target)) {
+        auto main = browser->GetMainFrame();
+        offerExternalLink(browser, target, main ? main->GetURL().ToString() : "");
+        return;
+    }
     if (onNewWindowEvent) {
         onNewWindowEvent(browser->GetIdentifier(), target, disposition);
     } else {
@@ -738,6 +794,7 @@ void WebviewHandler::cursorClick(int browserId, int x, int y, bool up, int butto
     auto it = browser_map_.find(browserId);
     if (it == browser_map_.end() || !it->second.browser) return;
     auto host = it->second.browser->GetHost();
+    if (!up) it->second.external_link_allowed = true;
     CefMouseEvent ev;
     ev.x = x;
     ev.y = y;
@@ -874,6 +931,10 @@ void WebviewHandler::sendKeyEvent(CefKeyEvent& ev)
     auto browser = getFocusedBrowser();
     if (!browser.get()) {
         return;
+    }
+    if (ev.type == KEYEVENT_RAWKEYDOWN || ev.type == KEYEVENT_KEYDOWN) {
+        auto it = browser_map_.find(browser->GetIdentifier());
+        if (it != browser_map_.end()) it->second.external_link_allowed = true;
     }
     browser->GetHost()->SendKeyEvent(ev);
 }

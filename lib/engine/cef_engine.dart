@@ -89,6 +89,8 @@ class CefBrowserView implements BrowserView {
         onNewWindow: (url, disposition) => _newTabs.add(
           NewTabRequest(url, background: disposition == cefNewBackgroundTab),
         ),
+        onExternalLink: (url, source) =>
+            _externalLinks.add(ExternalLinkRequest(url, source: source)),
         onUnhandledKey: (code, flags) => _keys.add(
           PageKey(
             code,
@@ -124,6 +126,7 @@ class CefBrowserView implements BrowserView {
   final _isReady = ValueNotifier<bool>(false);
   final _contextMenus = StreamController<PageContextMenu>.broadcast();
   final _newTabs = StreamController<NewTabRequest>.broadcast();
+  final _externalLinks = StreamController<ExternalLinkRequest>.broadcast();
   final _keys = StreamController<PageKey>.broadcast();
   final _zoom = ValueNotifier<double>(1);
   final _findResult = ValueNotifier<FindResult>(FindResult.none);
@@ -192,6 +195,8 @@ class CefBrowserView implements BrowserView {
   @override
   Stream<NewTabRequest> get newTabRequests => _newTabs.stream;
   @override
+  Stream<ExternalLinkRequest> get externalLinks => _externalLinks.stream;
+  @override
   Stream<PageKey> get unhandledKeys => _keys.stream;
   @override
   Future<void> editCommand(EditCommand command) =>
@@ -219,6 +224,7 @@ class CefBrowserView implements BrowserView {
   Future<void> dispose() {
     _contextMenus.close();
     _newTabs.close();
+    _externalLinks.close();
     _keys.close();
     _scriptMessages.close();
     return _controller.dispose();
