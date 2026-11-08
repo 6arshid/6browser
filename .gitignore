@@ -51,5 +51,8 @@ app.*.map.json
 third_party/webview_cef/third/cef/
 third_party/webview_cef/windows/prebuilt.zip
 
+# whisper.cpp source: downloaded at build time
+packages/whisper_voice/third/
+
 # Build artifacts
 /dist/

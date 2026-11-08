@@ -21,9 +21,37 @@ class MainActivity : FlutterActivity() {
     private var pendingScreenCapture: ((String?) -> Unit)? = null
     private var screenConsentOpen = false
     private var screenSiteDialog: AlertDialog? = null
+    private var voice: VoiceInput? = null
+    private var pendingVoice: Pair<String?, MethodChannel.Result>? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        val voiceChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "6browser/voice")
+        voice = VoiceInput(this, voiceChannel)
+        voiceChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start" -> {
+                    val language = call.argument<String>("language")
+                    if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                        startVoice(language, result)
+                    } else if (pendingVoice == null) {
+                        pendingVoice = language to result
+                        requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), VOICE_REQUEST_CODE)
+                    } else {
+                        result.error("busy", "Already asking for the microphone", null)
+                    }
+                }
+                "stop" -> {
+                    voice?.stop()
+                    result.success(null)
+                }
+                "cancel" -> {
+                    voice?.cancel()
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "6browser/app")
         channel.setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -167,7 +195,15 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         screenShare.stop()
+        voice?.cancel()
         super.onDestroy()
+    }
+
+    private fun startVoice(language: String?, result: MethodChannel.Result) {
+        val input = voice
+        val error = if (input == null) "unavailable" else input.start(language)
+        if (error == null) result.success(null)
+        else result.error(error, "Speech recognition is not available", null)
     }
 
     // Asks the user whether the site may use the devices, then makes sure the
@@ -218,6 +254,16 @@ class MainActivity : FlutterActivity() {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == VOICE_REQUEST_CODE) {
+            val (language, result) = pendingVoice ?: return
+            pendingVoice = null
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                startVoice(language, result)
+            } else {
+                result.error("permission", "Microphone permission denied", null)
+            }
+            return
+        }
         if (requestCode != MEDIA_REQUEST_CODE) return
         val result = pendingMediaResult ?: return
         pendingMediaResult = null
@@ -231,5 +277,6 @@ class MainActivity : FlutterActivity() {
         const val MEDIA_REQUEST_CODE = 6001
         const val SCREEN_REQUEST_CODE = 6002
         const val VERIFY_REQUEST_CODE = 6003
+        const val VOICE_REQUEST_CODE = 6004
     }
 }

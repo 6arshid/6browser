@@ -7,6 +7,8 @@ import '../passwords/passwords_page.dart';
 import '../profiles/profiles.dart';
 import '../profiles/profiles_page.dart';
 import '../tabs/tabs_controller.dart';
+import '../voice/voice_panel.dart';
+import '../voice/voice_settings.dart';
 import 'app_settings.dart';
 import 'appearance_settings.dart';
 import 'factory_reset.dart';
@@ -175,6 +177,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     ],
                   ),
                 ),
+                if (ref.watch(speechInputProvider) != null)
+                  const _Section(
+                    icon: Icons.mic_none,
+                    title: 'Voice commands',
+                    child: VoiceSettings(),
+                  ),
                 _Section(
                   icon: Icons.home_outlined,
                   title: 'On startup and Home',

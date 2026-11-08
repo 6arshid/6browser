@@ -9,6 +9,7 @@
 #include <file_selector_windows/file_selector_windows.h>
 #include <local_auth_windows/local_auth_plugin.h>
 #include <webview_cef/webview_cef_plugin_c_api.h>
+#include <whisper_voice/whisper_voice_plugin_c_api.h>
 
 void RegisterPlugins(flutter::PluginRegistry* registry) {
   FileSelectorWindowsRegisterWithRegistrar(
@@ -17,4 +18,6 @@ void RegisterPlugins(flutter::PluginRegistry* registry) {
       registry->GetRegistrarForPlugin("LocalAuthPlugin"));
   WebviewCefPluginCApiRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("WebviewCefPluginCApi"));
+  WhisperVoicePluginCApiRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("WhisperVoicePluginCApi"));
 }

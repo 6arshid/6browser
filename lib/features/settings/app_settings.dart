@@ -1,7 +1,11 @@
+import 'dart:ui' show PlatformDispatcher;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/providers.dart';
+import '../voice/voice_language.dart';
+import '../voice/whisper_models.dart';
 
 /// A search engine preset; `%s` in [template] is the encoded query.
 class SearchEngine {
@@ -30,6 +34,8 @@ class AppSettings {
     this.showBookmarksBar = false,
     this.savePasswords = true,
     this.fillPasswords = true,
+    this.voiceLanguage = VoiceLanguage.english,
+    this.voiceModel = WhisperModel.standard,
   });
 
   final ThemeMode themeMode;
@@ -50,6 +56,13 @@ class AppSettings {
 
   /// Fill saved passwords into sign-in forms when a page opens.
   final bool fillPasswords;
+
+  /// Language voice commands are spoken in: the user's choice, else the
+  /// first of the system's languages that can be spoken.
+  final VoiceLanguage voiceLanguage;
+
+  /// Speech model for voice commands on Windows.
+  final WhisperModel voiceModel;
 
   static const defaults = AppSettings();
 
@@ -73,6 +86,10 @@ class AppSettings {
     showBookmarksBar: m['bookmarksBar'] == 'true',
     savePasswords: m['passwordsSave'] != 'false',
     fillPasswords: m['passwordsFill'] != 'false',
+    voiceLanguage:
+        VoiceLanguage.byCode(m['voiceLanguage']) ??
+        VoiceLanguage.fromLocales(PlatformDispatcher.instance.locales),
+    voiceModel: WhisperModel.fromName(m['voiceModel']),
   );
 }
 

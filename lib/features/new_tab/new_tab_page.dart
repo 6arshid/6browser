@@ -12,6 +12,7 @@ import '../settings/app_settings.dart';
 import '../settings/appearance_settings.dart';
 import '../tabs/tabs_controller.dart';
 import '../tabs/url_input.dart';
+import '../voice/voice_panel.dart';
 import 'new_tab_tiles.dart';
 
 const _tileWidth = 96.0;
@@ -191,6 +192,7 @@ class _SearchBox extends ConsumerWidget {
     final fill = view.incognito
         ? BrowserColors.incognito.omnibox
         : colors.omnibox;
+    final voice = ref.watch(speechInputProvider) != null;
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 560),
       child: Material(
@@ -215,6 +217,20 @@ class _SearchBox extends ConsumerWidget {
                 color: scheme.onSurfaceVariant,
               ),
             ),
+            suffixIcon: voice
+                ? Padding(
+                    padding: const EdgeInsetsDirectional.only(end: 4),
+                    child: IconButton(
+                      tooltip: 'Voice command',
+                      icon: Icon(
+                        CupertinoIcons.mic,
+                        size: 20,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                      onPressed: () => runVoiceCommand(context, ref, view),
+                    ),
+                  )
+                : null,
             hintText: engine == null
                 ? 'Search or type a URL'
                 : 'Search ${engine.name} or type a URL',

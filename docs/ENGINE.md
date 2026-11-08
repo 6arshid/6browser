@@ -325,3 +325,57 @@ patch (Chromium's `ExtensionTabUtil` only knows Chrome `Browser` windows);
 "Add to Chrome" on the store itself (its `webstorePrivate` path crashes this
 engine and stays removed); badges; macOS/Linux pipe.
 
+
+## Voice commands (2026-11-08)
+
+A microphone on the New Tab page's search box: "search Iran", «جستجو کن
+ایران», "open YouTube", «برو به یوتیوب», "new tab", «برگرد»... The words go
+through `parseVoiceCommand` (`lib/features/voice/voice_commands.dart`):
+browser commands (the `BrowserCommand` table), searches (also on YouTube,
+Wikipedia...), sites by name, and otherwise the same as typing in the
+address bar.
+
+- **Windows: whisper.cpp, offline.** Windows' own recognizer
+  (`Windows.Media.SpeechRecognition`) has no Persian at all (this PC offers
+  only en-US/en-GB), so the `packages/whisper_voice` plugin records the
+  microphone (waveIn, 16 kHz mono) and runs whisper.cpp 1.9.5, downloaded at
+  build time into `packages/whisper_voice/third` (pinned SHA-256; or set
+  `WHISPER_CPP_DIR`). Built with MSVC, CPU only, `GGML_BACKEND_DL` +
+  `GGML_CPU_ALL_VARIANTS`: nine `ggml-cpu-*.dll` (x64 ... icelake,
+  alderlake) and ggml loads the best for the CPU, so old CPUs work and new
+  ones use AVX2/AVX-512/VNNI. Backends load only from the exe's folder. No
+  OpenMP (would need vcomp140.dll).
+- **Models** are downloaded on first use into `%APPDATA%\6arshid\6browser\
+  speech` (shared by profiles), from Hugging Face with resume, through the
+  Windows proxy setting (Dart's HttpClient ignores it), checked by SHA-256.
+  "Choose file" installs one downloaded elsewhere. Standard = small q5_1
+  (190 MB), Accurate = large-v3-turbo q5_0 (574 MB).
+- **Speed** (i9-14900HX, 8 threads, whisper-cli, English TTS commands):
+  small, 30 s window: 1.4 s, with auto language detection 2.5 s; small with
+  `audio_ctx` 512: 0.6 s. Turbo: 7 s per encoder pass at 30 s, 3.8 s at
+  768, and at 384 it repeats itself endlessly (so 768 minimum for turbo).
+  The plugin sizes `audio_ctx` to the recording (no less than the model's
+  minimum) and trims silence first. It can still detect the language among
+  given candidates ("auto"; Whisper's own detection picks among ~100), but
+  the app no longer asks for that (below). The detection pass runs at the
+  context size of the previous `whisper_full` call, so an idle "prime" run
+  on silence at 256 keeps it cheap.
+- **The language is chosen by hand** (Settings > Voice commands, or the
+  globe button in the voice panel; default: the first of the system's
+  languages Whisper handles well, 57 in all). Automatic detection between
+  Persian and English was the first default, but speech in any other
+  language (Danish) came out as English or Persian gibberish, and forcing
+  Persian on English speech garbles it too ("search Iran" became «سر
+  چیران»). A fixed language also skips the detection pass (~0.6 s instead
+  of ~1 s on this PC). Commands are understood in English, Persian and
+  Danish; in other languages what is said is searched for.
+- Persian accuracy was **not measured** (no Persian test audio could be
+  fetched); English TTS commands were recognized correctly.
+- End of speech: `EndpointDetector` on the 50 ms levels (1.2 s of quiet after
+  speech; gives up after 6 s without speech; 10 s at most). Known Whisper
+  inventions on silence ("Thank you.", «زیرنویس ...») count as nothing heard.
+- **Android**: the phone's `SpeechRecognizer` (Google's on most phones;
+  Persian and Danish are supported), with partial results, in the chosen
+  language (its BCP 47 tag).
+- Not done: GPU (a Vulkan ggml backend would make turbo fast, but needs the
+  Vulkan SDK to build); macOS/Linux/iOS have no voice button.
