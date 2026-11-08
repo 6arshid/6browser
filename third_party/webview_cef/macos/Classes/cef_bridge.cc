@@ -8,4 +8,5 @@
 #include "../../common/webview_js_handler.cc"
 #include "../../common/webview_plugin.cc"
 #include "../../common/webview_value.cc"
+#include "../../common/system_audio_win.cc"
 #endif

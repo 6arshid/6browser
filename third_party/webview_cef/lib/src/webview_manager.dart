@@ -191,6 +191,62 @@ class WebviewManager extends ValueNotifier<bool> {
             call.arguments['url'] as String,
             call.arguments['source'] as String);
         return;
+      // 6browser patch: requests nobody answers would leave the page
+      // waiting, so a closed tab's requests are refused here.
+      case 'onPermissionRequest':
+        final browserId = call.arguments['browserId'] as int;
+        final requestId = call.arguments['requestId'] as int;
+        final callback = _webViews[browserId]?.listener?.onPermissionRequest;
+        if (callback == null) {
+          await pluginChannel.invokeMethod('respondPermission', [requestId, 0]);
+          return;
+        }
+        callback(requestId, call.arguments['origin'] as String,
+            call.arguments['permissions'] as int);
+        return;
+      case 'onPermissionDismissed':
+        final browserId = call.arguments['browserId'] as int;
+        _webViews[browserId]
+            ?.listener
+            ?.onPermissionDismissed
+            ?.call(call.arguments['requestId'] as int);
+        return;
+      case 'onScreenShareRequest':
+        final browserId = call.arguments['browserId'] as int;
+        final callback = _webViews[browserId]?.listener?.onScreenShareRequest;
+        if (callback == null) {
+          await pluginChannel
+              .invokeMethod('respondScreenShare', [browserId, '', false]);
+          return;
+        }
+        callback(call.arguments['origin'] as String,
+            call.arguments['audio'] as bool);
+        return;
+      case 'onScreenShareCancelled':
+        final browserId = call.arguments['browserId'] as int;
+        _webViews[browserId]?.listener?.onScreenShareCancelled?.call();
+        return;
+      case 'onJsDialog':
+        final browserId = call.arguments['browserId'] as int;
+        final requestId = call.arguments['requestId'] as int;
+        final callback = _webViews[browserId]?.listener?.onJsDialog;
+        if (callback == null) {
+          await pluginChannel
+              .invokeMethod('respondJsDialog', [requestId, false, '']);
+          return;
+        }
+        callback(
+            requestId,
+            call.arguments['type'] as int,
+            call.arguments['origin'] as String,
+            call.arguments['message'] as String,
+            call.arguments['defaultText'] as String,
+            call.arguments['isReload'] as bool);
+        return;
+      case 'onJsDialogsClosed':
+        final browserId = call.arguments['browserId'] as int;
+        _webViews[browserId]?.listener?.onJsDialogsClosed?.call();
+        return;
       case 'onZoomChanged':
         int browserId = call.arguments['browserId'] as int;
         _webViews[browserId]
@@ -243,6 +299,19 @@ class WebviewManager extends ValueNotifier<bool> {
       await _webViews[browserId]?.executeJavaScript(script.script);
     }
   }
+
+  /// 6browser patch: mirrors a site permission decision made in the app's
+  /// settings into Chromium's own per-site settings. [permissions]:
+  /// cef_permission_request_types_t bits; [value]: 0 default (ask), 1 allow,
+  /// 2 block (cef_content_setting_values_t).
+  Future<void> setSitePermission(String origin, int permissions, int value) =>
+      pluginChannel
+          .invokeMethod('setSitePermission', [origin, permissions, value]);
+
+  /// 6browser patch: true when screen sharing can include the computer's
+  /// sound (without this browser's own).
+  Future<bool> systemAudioSupported() async =>
+      await pluginChannel.invokeMethod<bool>('systemAudioSupported') ?? false;
 
   Future<void> setCookie(String domain, String key, String val) async {
     assert(value);

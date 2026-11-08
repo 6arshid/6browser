@@ -174,6 +174,24 @@ class WebViewController extends ValueNotifier<bool> {
 
   Future<void> stopLoad() => _call('stopLoad', _browserId);
 
+  /// 6browser patch: answers [WebviewEventsListener.onPermissionRequest].
+  /// [result]: 0 dismissed, 1 allowed, 2 blocked.
+  Future<void> respondPermission(int requestId, int result) =>
+      _pluginChannel.invokeMethod('respondPermission', [requestId, result]);
+
+  /// 6browser patch: answers [WebviewEventsListener.onScreenShareRequest]
+  /// with "screen:<index>:0" or "window:<HWND>:0"; an empty [sourceId]
+  /// cancels.
+  Future<void> respondScreenShare(String sourceId, {bool audio = false}) async {
+    if (_isDisposed || !value) return;
+    return _pluginChannel
+        .invokeMethod('respondScreenShare', [_browserId, sourceId, audio]);
+  }
+
+  /// 6browser patch: answers [WebviewEventsListener.onJsDialog].
+  Future<void> respondJsDialog(int requestId, bool ok, [String text = '']) =>
+      _pluginChannel.invokeMethod('respondJsDialog', [requestId, ok, text]);
+
   /// 6browser patch: a hidden (background) tab stops rendering and its
   /// timers slow down, as in Chrome. Applied once the browser exists.
   Future<void> setVisible(bool visible) async {

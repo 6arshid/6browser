@@ -52,6 +52,78 @@ class CefEngine implements BrowserEngine {
       defaultTargetPlatform == TargetPlatform.windows ? _extensions : null;
 
   static final _extensions = _CefExtensionHost();
+
+  /// Chromium keeps its own Allow/Block per site for permission prompts;
+  /// it must follow changes made in the app's settings.
+  @override
+  Future<void> setSitePermission(
+    String origin,
+    Set<SitePermission> permissions,
+    bool? allowed,
+  ) async {
+    if (defaultTargetPlatform != TargetPlatform.windows) return;
+    final bits = cefPermissionBits(permissions);
+    if (bits == 0) return;
+    // cef_content_setting_values_t: default (ask), allow, block.
+    final value = switch (allowed) {
+      null => 0,
+      true => 1,
+      false => 2,
+    };
+    await WebviewManager().setSitePermission(origin, bits, value);
+  }
+
+  /// True when screen sharing can include the computer's sound.
+  static Future<bool> systemAudioSupported() async {
+    if (defaultTargetPlatform != TargetPlatform.windows) return false;
+    try {
+      return await WebviewManager().systemAudioSupported();
+    } on Object {
+      return false;
+    }
+  }
+}
+
+// cef_permission_request_types_t bits of each permission the app can ask
+// about. Requests for anything else (notifications, VR...) are dismissed:
+// this engine could not deliver them.
+const _cefBits = {
+  SitePermission.cameraControl: 1 << 1,
+  SitePermission.camera: 1 << 2,
+  SitePermission.clipboard: 1 << 4,
+  SitePermission.localFonts: 1 << 7,
+  SitePermission.location: 1 << 8,
+  SitePermission.idleDetection: 1 << 11,
+  SitePermission.microphone: 1 << 12,
+  SitePermission.midi: 1 << 13,
+  SitePermission.automaticDownloads: 1 << 14,
+  SitePermission.windowManagement: 1 << 23,
+  SitePermission.localNetwork: 1 << 25,
+  SitePermission.sensors: 1 << 28,
+};
+
+// Local network access is also asked as "local network" and "loopback".
+const _localNetworkBits = 1 << 25 | 1 << 26 | 1 << 27;
+
+/// The CEF permission bits for [permissions].
+int cefPermissionBits(Iterable<SitePermission> permissions) =>
+    permissions.fold(0, (bits, p) => bits | _cefBits[p]!);
+
+/// The permissions in CEF permission [bits]; null when some are unknown.
+Set<SitePermission>? sitePermissionsOf(int bits) {
+  final result = <SitePermission>{};
+  var rest = bits;
+  if (rest & _localNetworkBits != 0) {
+    result.add(SitePermission.localNetwork);
+    rest &= ~_localNetworkBits;
+  }
+  for (final MapEntry(key: permission, value: bit) in _cefBits.entries) {
+    if (rest & bit != 0) {
+      result.add(permission);
+      rest &= ~bit;
+    }
+  }
+  return rest == 0 && result.isNotEmpty ? result : null;
 }
 
 /// Loads extensions over the plugin's private DevTools pipe (the browser
@@ -91,6 +163,20 @@ class CefBrowserView implements BrowserView {
         ),
         onExternalLink: (url, source) =>
             _externalLinks.add(ExternalLinkRequest(url, source: source)),
+        onPermissionRequest: _onPermissionRequest,
+        onPermissionDismissed: (id) => _permissions.remove(id)?.withdraw(),
+        onScreenShareRequest: _onScreenShareRequest,
+        onScreenShareCancelled: () {
+          _screenShare?.withdraw();
+          _screenShare = null;
+        },
+        onJsDialog: _onJsDialog,
+        onJsDialogsClosed: () {
+          for (final dialog in _dialogs) {
+            dialog.withdraw();
+          }
+          _dialogs.clear();
+        },
         onUnhandledKey: (code, flags) => _keys.add(
           PageKey(
             code,
@@ -115,6 +201,75 @@ class CefBrowserView implements BrowserView {
 
   static const _channel = 'sixbrowserPage';
 
+  void _onPermissionRequest(int id, String origin, int bits) {
+    final permissions = sitePermissionsOf(bits);
+    // Nobody to ask (no tab host listening): refused, not left waiting.
+    if (permissions == null ||
+        _permissionRequests.isClosed ||
+        !_permissionRequests.hasListener) {
+      _controller.respondPermission(id, 0);
+      return;
+    }
+    final request = PermissionRequest(
+      origin: origin,
+      permissions: permissions,
+      onAnswer: (answer) {
+        _permissions.remove(id);
+        _controller.respondPermission(id, switch (answer) {
+          PermissionAnswer.dismiss => 0,
+          PermissionAnswer.allow => 1,
+          PermissionAnswer.block => 2,
+        });
+      },
+    );
+    _permissions[id] = request;
+    _permissionRequests.add(request);
+  }
+
+  void _onScreenShareRequest(String origin, bool audioOffered) {
+    _screenShare?.withdraw();
+    final request = ScreenShareRequest(
+      origin: origin,
+      audioOffered: audioOffered,
+      onAnswer: (sourceId, audio) {
+        _screenShare = null;
+        _controller.respondScreenShare(sourceId ?? '', audio: audio);
+      },
+    );
+    if (_screenShares.isClosed || !_screenShares.hasListener) {
+      return request.cancel();
+    }
+    _screenShare = request;
+    _screenShares.add(request);
+  }
+
+  void _onJsDialog(
+    int id,
+    int type,
+    String origin,
+    String message,
+    String defaultText,
+    bool isReload,
+  ) {
+    late final PageDialogRequest request;
+    request = PageDialogRequest(
+      type: PageDialogType.values[type.clamp(0, 3)],
+      origin: origin,
+      message: message,
+      defaultText: defaultText,
+      isReload: isReload,
+      onAnswer: (ok, text) {
+        _dialogs.remove(request);
+        _controller.respondJsDialog(id, ok, text);
+      },
+    );
+    if (_pageDialogs.isClosed || !_pageDialogs.hasListener) {
+      return request.respond(false);
+    }
+    _dialogs.add(request);
+    _pageDialogs.add(request);
+  }
+
   @override
   final bool incognito;
 
@@ -128,6 +283,12 @@ class CefBrowserView implements BrowserView {
   final _newTabs = StreamController<NewTabRequest>.broadcast();
   final _externalLinks = StreamController<ExternalLinkRequest>.broadcast();
   final _keys = StreamController<PageKey>.broadcast();
+  final _permissionRequests = StreamController<PermissionRequest>.broadcast();
+  final _screenShares = StreamController<ScreenShareRequest>.broadcast();
+  final _pageDialogs = StreamController<PageDialogRequest>.broadcast();
+  final _permissions = <int, PermissionRequest>{};
+  ScreenShareRequest? _screenShare;
+  final _dialogs = <PageDialogRequest>[];
   final _zoom = ValueNotifier<double>(1);
   final _findResult = ValueNotifier<FindResult>(FindResult.none);
 
@@ -199,6 +360,13 @@ class CefBrowserView implements BrowserView {
   @override
   Stream<PageKey> get unhandledKeys => _keys.stream;
   @override
+  Stream<PermissionRequest> get permissionRequests =>
+      _permissionRequests.stream;
+  @override
+  Stream<ScreenShareRequest> get screenShareRequests => _screenShares.stream;
+  @override
+  Stream<PageDialogRequest> get pageDialogs => _pageDialogs.stream;
+  @override
   Future<void> editCommand(EditCommand command) =>
       _controller.editCommand(command.name);
   @override
@@ -227,6 +395,14 @@ class CefBrowserView implements BrowserView {
     _externalLinks.close();
     _keys.close();
     _scriptMessages.close();
+    _permissionRequests.close();
+    _screenShares.close();
+    _pageDialogs.close();
+    // The engine drops what the closed tab was asking.
+    for (final request in [..._permissions.values, ..._dialogs]) {
+      request.withdraw();
+    }
+    _screenShare?.withdraw();
     return _controller.dispose();
   }
 }

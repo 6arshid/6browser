@@ -93,6 +93,7 @@ class MainActivity : FlutterActivity() {
                         call.argument<String>("origin") ?: "",
                         call.argument<Boolean>("camera") == true,
                         call.argument<Boolean>("microphone") == true,
+                        call.argument<Boolean>("ask") != false,
                         result,
                     )
                     "sealSecret" -> try {
@@ -206,17 +207,23 @@ class MainActivity : FlutterActivity() {
         else result.error(error, "Speech recognition is not available", null)
     }
 
-    // Asks the user whether the site may use the devices, then makes sure the
-    // app itself holds the matching Android runtime permissions. Resolves to
-    // true only when every requested device is allowed. Not remembered.
+    // Asks the user whether the site may use the devices (unless the app
+    // already did: [ask] false), then makes sure the app itself holds the
+    // matching Android runtime permissions. Resolves to true only when every
+    // requested device is allowed.
     private fun requestMediaAccess(
         origin: String,
         camera: Boolean,
         microphone: Boolean,
+        ask: Boolean,
         result: MethodChannel.Result,
     ) {
         if (pendingMediaResult != null || (!camera && !microphone)) {
             result.success(false)
+            return
+        }
+        if (!ask) {
+            grantRuntimePermissions(camera, microphone, result)
             return
         }
         val devices = listOfNotNull(
@@ -229,16 +236,7 @@ class MainActivity : FlutterActivity() {
             .setMessage("$origin\n\nAllow this site to use your $devices?\n\nThis permission applies to this request only.")
             .setPositiveButton("Allow") { _, _ ->
                 answered = true
-                val needed = listOfNotNull(
-                    if (camera) Manifest.permission.CAMERA else null,
-                    if (microphone) Manifest.permission.RECORD_AUDIO else null,
-                ).filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-                if (needed.isEmpty()) {
-                    result.success(true)
-                } else {
-                    pendingMediaResult = result
-                    requestPermissions(needed.toTypedArray(), MEDIA_REQUEST_CODE)
-                }
+                grantRuntimePermissions(camera, microphone, result)
             }
             .setNegativeButton("Block") { _, _ ->
                 answered = true
@@ -246,6 +244,25 @@ class MainActivity : FlutterActivity() {
             }
             .setOnDismissListener { if (!answered) result.success(false) }
             .show()
+    }
+
+    // Resolves to true once the app holds the runtime permissions for the
+    // devices (asking Android for any it lacks).
+    private fun grantRuntimePermissions(
+        camera: Boolean,
+        microphone: Boolean,
+        result: MethodChannel.Result,
+    ) {
+        val needed = listOfNotNull(
+            if (camera) Manifest.permission.CAMERA else null,
+            if (microphone) Manifest.permission.RECORD_AUDIO else null,
+        ).filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (needed.isEmpty()) {
+            result.success(true)
+        } else {
+            pendingMediaResult = result
+            requestPermissions(needed.toTypedArray(), MEDIA_REQUEST_CODE)
+        }
     }
 
     override fun onRequestPermissionsResult(

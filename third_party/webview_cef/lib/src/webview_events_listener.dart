@@ -80,6 +80,24 @@ typedef UnhandledKeyCb = void Function(int keyCode, int modifiers);
 /// CEF_WOD_NEW_BACKGROUND_TAB: Ctrl+click or middle click on a link.
 const int cefNewBackgroundTab = 4;
 
+/// 6browser patch: a site asks for [permissions] (cef_permission_request_types_t
+/// bits). Answer with [WebViewController.respondPermission].
+typedef PermissionRequestCb = void Function(
+    int requestId, String origin, int permissions);
+
+/// 6browser patch: a permission request went away unanswered (navigation).
+typedef PermissionDismissedCb = void Function(int requestId);
+
+/// 6browser patch: the page called getDisplayMedia. [audioOffered]: the page
+/// asked for audio and system audio can be shared. Answer with
+/// [WebViewController.respondScreenShare].
+typedef ScreenShareRequestCb = void Function(String origin, bool audioOffered);
+
+/// 6browser patch: alert (0), confirm (1), prompt (2) or "leave site?" (3).
+/// Answer with [WebViewController.respondJsDialog].
+typedef JsDialogCb = void Function(int requestId, int type, String origin,
+    String message, String defaultText, bool isReload);
+
 class WebviewEventsListener {
   TitleChangeCb? onTitleChanged;
   UrlChangeCb? onUrlChanged;
@@ -92,6 +110,12 @@ class WebviewEventsListener {
   NewWindowCb? onNewWindow;
   ExternalLinkCb? onExternalLink;
   UnhandledKeyCb? onUnhandledKey;
+  PermissionRequestCb? onPermissionRequest;
+  PermissionDismissedCb? onPermissionDismissed;
+  ScreenShareRequestCb? onScreenShareRequest;
+  void Function()? onScreenShareCancelled;
+  JsDialogCb? onJsDialog;
+  void Function()? onJsDialogsClosed;
 
   WebviewEventsListener({
     this.onTitleChanged,
@@ -105,5 +129,11 @@ class WebviewEventsListener {
     this.onNewWindow,
     this.onExternalLink,
     this.onUnhandledKey,
+    this.onPermissionRequest,
+    this.onPermissionDismissed,
+    this.onScreenShareRequest,
+    this.onScreenShareCancelled,
+    this.onJsDialog,
+    this.onJsDialogsClosed,
   });
 }

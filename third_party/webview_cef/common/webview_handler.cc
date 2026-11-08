@@ -37,6 +37,8 @@ namespace stringpatch
 }
 
 #include "webview_js_handler.h"
+#include "system_audio_win.h"
+#include "include/cef_request_context.h"
 
 
 WebviewHandler::WebviewHandler() {
@@ -48,107 +50,153 @@ WebviewHandler::~WebviewHandler() {
     js_callbacks_.clear();
 }
 
-#if defined(OS_WIN)
-namespace {
-// CEF may ask about one getUserMedia call twice: OnShowPermissionPrompt
-// (Chrome's permission layer) and OnRequestMediaAccessPermission (device
-// access). Both must be granted, so a "Yes" is reused for a few seconds for
-// the same origin and devices instead of prompting twice.
-struct RecentMediaGrant {
-    std::wstring origin;
-    bool audio = false;
-    bool video = false;
-    std::chrono::steady_clock::time_point at;
-};
-RecentMediaGrant recent_media_grant_;
+// ---- 6browser patch: site permissions, screen sharing, page dialogs ----
+// The host (Flutter) asks the user in its own style and remembers decisions;
+// this side only forwards requests and applies the answers.
 
-void LogPermission(const std::wstring& line) {
-    wchar_t temp[MAX_PATH];
-    if (!GetTempPathW(MAX_PATH, temp)) return;
-    const std::wstring path = std::wstring(temp) + L"6browser-permissions.log";
-    FILE* f = nullptr;
-    if (_wfopen_s(&f, path.c_str(), L"a, ccs=UTF-8") != 0) return;
-    if (!f) return;
-    fwprintf(f, L"%ls\n", line.c_str());
-    fclose(f);
+struct WebviewHandler::AudioSession {
+    int id = 0;
+    std::string frameId;
+    std::unique_ptr<SystemAudioCapture> capture;
+};
+
+namespace {
+
+// "https://meet.google.com/" -> "https://meet.google.com".
+std::string OriginOf(const std::string& url) {
+    CefURLParts parts;
+    if (!CefParseURL(url, parts)) return url;
+    const std::string scheme = CefString(&parts.scheme).ToString();
+    const std::string host = CefString(&parts.host).ToString();
+    const std::string port = CefString(&parts.port).ToString();
+    if (host.empty()) return url;
+    std::string origin = scheme + "://" + host;
+    if (!port.empty()) origin += ":" + port;
+    return origin;
 }
 
-bool AskMediaPermission(CefRefPtr<CefBrowser> browser, const std::wstring& origin,
-                        bool audio, bool video) {
-    const auto now = std::chrono::steady_clock::now();
-    if (recent_media_grant_.origin == origin &&
-        (!audio || recent_media_grant_.audio) &&
-        (!video || recent_media_grant_.video) &&
-        now - recent_media_grant_.at < std::chrono::seconds(10)) {
-        return true;
+// getUserMedia devices as the permission prompt's kinds, so the host sees
+// one vocabulary for "camera" and "microphone".
+uint32_t PromptKindsForMedia(uint32_t media) {
+    uint32_t kinds = 0;
+    if (media & CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE) kinds |= CEF_PERMISSION_TYPE_MIC_STREAM;
+    if (media & CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE) kinds |= CEF_PERMISSION_TYPE_CAMERA_STREAM;
+    return kinds;
+}
+
+// "screen:<index>:0" or "window:<HWND>:0", the forms
+// content::DesktopMediaID::Parse accepts for native screens and windows.
+bool ValidSourceId(const std::string& id) {
+    std::string rest;
+    if (id.rfind("screen:", 0) == 0) rest = id.substr(7);
+    else if (id.rfind("window:", 0) == 0) rest = id.substr(7);
+    else return false;
+    const size_t colon = rest.find(':');
+    if (colon == std::string::npos || rest.substr(colon) != ":0") return false;
+    std::string number = rest.substr(0, colon);
+    if (!number.empty() && number[0] == '-') number = number.substr(1);
+    if (number.empty() || number.size() > 20) return false;
+    for (char c : number) {
+        if (c < '0' || c > '9') return false;
     }
-    std::wstring resources;
-    if (audio) resources = L"microphone";
-    if (video) {
-        if (!resources.empty()) resources += L" and ";
-        resources += L"camera";
-    }
-    const std::wstring message = origin +
-        L"\n\nAllow this site to use your " + resources +
-        L"?\n\nThis permission applies to this request only.";
-    const int result = MessageBoxW(browser->GetHost()->GetWindowHandle(),
-        message.c_str(), L"6browser - Site permission",
-        MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2 | MB_SETFOREGROUND);
-    if (result != IDYES) return false;
-    recent_media_grant_ = {origin, audio, video, std::chrono::steady_clock::now()};
     return true;
 }
+
+std::string SurfaceOf(const std::string& sourceId) {
+    if (sourceId.rfind("screen:", 0) == 0) return "monitor";
+    if (sourceId.rfind("window:", 0) == 0) return "window";
+    return "";
+}
+
+// A screen share must follow the user's choice within this time.
+constexpr auto kCaptureGrantLifetime = std::chrono::seconds(10);
+
+
 }  // namespace
-#endif
+
+bool WebviewHandler::systemAudioSupported() {
+    return SystemAudioCapture::IsSupported();
+}
+
+int WebviewHandler::askPermission(CefRefPtr<CefBrowser> browser, const std::string& origin,
+                                  uint32_t permissions, PendingPermission pending) {
+    const int id = next_permission_id_++;
+    pending.browserId = browser->GetIdentifier();
+    pending.permissions = permissions;
+    pending_permissions_[id] = pending;
+    if (onPermissionRequestEvent) {
+        onPermissionRequestEvent(pending.browserId, id, origin, permissions);
+    } else {
+        respondPermission(id, 0);
+    }
+    return id;
+}
+
+void WebviewHandler::respondPermission(int requestId, int result) {
+    if (!CefCurrentlyOn(TID_UI)) {
+        CefPostTask(TID_UI, base::BindOnce(&WebviewHandler::respondPermission, this, requestId, result));
+        return;
+    }
+    auto it = pending_permissions_.find(requestId);
+    if (it == pending_permissions_.end()) return;
+    const PendingPermission pending = it->second;
+    pending_permissions_.erase(it);
+    if (pending.media) {
+        // getUserMedia takes all requested devices or none.
+        pending.media->Continue(result == 1 ? pending.mediaRequested
+                                            : static_cast<uint32_t>(CEF_MEDIA_PERMISSION_NONE));
+    } else if (pending.prompt) {
+        pending.prompt->Continue(result == 1   ? CEF_PERMISSION_RESULT_ACCEPT
+                                 : result == 2 ? CEF_PERMISSION_RESULT_DENY
+                                               : CEF_PERMISSION_RESULT_DISMISS);
+    }
+}
 
 bool WebviewHandler::OnRequestMediaAccessPermission(
     CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
     const CefString& requesting_origin, uint32_t requested_permissions,
     CefRefPtr<CefMediaAccessCallback> callback) {
     CEF_REQUIRE_UI_THREAD();
-#if defined(OS_WIN)
-    // Alloy's callback captures the entire desktop when no source ID was
-    // supplied. It does NOT open Chrome's source picker. Obtain explicit,
-    // uncached consent for that scope before continuing the request.
-    constexpr uint32_t display = CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE |
+    const int browserId = browser->GetIdentifier();
+    constexpr uint32_t desktop = CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE |
                                  CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE;
-    if ((requested_permissions & CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE) &&
-        !(requested_permissions & ~display)) {
-        const std::wstring message = requesting_origin.ToWString() +
-            L"\n\nShare your ENTIRE desktop with this site?"
-            L"\nEverything visible on your screens may be shared, including other apps and notifications."
-            L"\n\nUse the site's Stop presenting / Stop sharing control to stop."
-            L"\nThis permission applies to this request only.";
-        const bool allowed = MessageBoxW(browser->GetHost()->GetWindowHandle(),
-            message.c_str(), L"6browser - Share entire screen",
-            MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2 | MB_SETFOREGROUND) == IDYES;
-        // System audio is never granted: CEF captures it with a plain
-        // "loopback" device that includes this browser's own playback, so the
-        // other people in a call (e.g. Google Meet) hear themselves echoed.
-        // getDisplayMedia treats audio as optional, so video alone is valid.
-        callback->Continue(allowed ? CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE : 0);
+    if (requested_permissions & desktop) {
+        // Screen capture. Alloy has no source picker: without a source it
+        // takes the whole desktop, and its "system audio" includes this
+        // browser's own sound. So the page's getDisplayMedia is replaced
+        // (webview_app.cc): the host's picker runs first, then the shim asks
+        // for exactly the chosen screen or window, video only. That one
+        // request is allowed, once; anything else is refused and closes an
+        // open picker, so a page cannot slip in a source of its own.
+        auto grant = capture_grants_.find(browserId);
+        const bool granted =
+            grant != capture_grants_.end() &&
+            requested_permissions == CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE &&
+            frame && grant->second.frameId == frame->GetIdentifier().ToString() &&
+            std::chrono::steady_clock::now() < grant->second.expires;
+        if (grant != capture_grants_.end()) capture_grants_.erase(grant);
+        if (!granted) {
+            cancelCapturePick(browserId);
+            audio_allowed_.erase(browserId);
+        }
+        callback->Continue(granted ? static_cast<uint32_t>(CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE)
+                                   : static_cast<uint32_t>(CEF_MEDIA_PERMISSION_NONE));
         return true;
     }
-    // Alloy's default is to deny silently. Ask for each request rather than
-    // enabling --enable-media-stream, which grants every site access.
     constexpr uint32_t devices = CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE |
                                  CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE;
-    LogPermission(L"media access " + requesting_origin.ToWString() +
-                  L" permissions=" + std::to_wstring(requested_permissions));
-    // Deny unknown permissions rather than treating them as camera/microphone.
     if (!requested_permissions || (requested_permissions & ~devices)) {
         callback->Cancel();
         return true;
     }
-    const bool allowed = AskMediaPermission(browser, requesting_origin.ToWString(),
-        requested_permissions & CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE,
-        requested_permissions & CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE);
-    LogPermission(allowed ? L"  -> allowed" : L"  -> denied");
-    callback->Continue(allowed ? requested_permissions : 0);
+    // Alloy's default is to deny silently, and --enable-media-stream would
+    // allow every site. The host answers from the user's saved choice or asks.
+    PendingPermission pending;
+    pending.mediaRequested = requested_permissions;
+    pending.media = callback;
+    askPermission(browser, OriginOf(requesting_origin.ToString()),
+                  PromptKindsForMedia(requested_permissions), pending);
     return true;
-#else
-    return false;
-#endif
 }
 
 bool WebviewHandler::OnShowPermissionPrompt(
@@ -156,25 +204,244 @@ bool WebviewHandler::OnShowPermissionPrompt(
     const CefString& requesting_origin, uint32_t requested_permissions,
     CefRefPtr<CefPermissionPromptCallback> callback) {
     CEF_REQUIRE_UI_THREAD();
-#if defined(OS_WIN)
-    // With Alloy style the default is IGNORE, which also blocks getUserMedia.
-    constexpr uint32_t devices = CEF_PERMISSION_TYPE_CAMERA_STREAM |
-                                 CEF_PERMISSION_TYPE_MIC_STREAM;
-    LogPermission(L"prompt " + requesting_origin.ToWString() +
-                  L" permissions=" + std::to_wstring(requested_permissions));
-    if (!requested_permissions || (requested_permissions & ~devices)) {
-        return false;
-    }
-    const bool allowed = AskMediaPermission(browser, requesting_origin.ToWString(),
-        requested_permissions & CEF_PERMISSION_TYPE_MIC_STREAM,
-        requested_permissions & CEF_PERMISSION_TYPE_CAMERA_STREAM);
-    LogPermission(allowed ? L"  -> allowed" : L"  -> denied");
-    callback->Continue(allowed ? CEF_PERMISSION_RESULT_ACCEPT
-                               : CEF_PERMISSION_RESULT_DENY);
+    // With Alloy style the default is IGNORE. The host answers what it knows
+    // and dismisses the rest.
+    if (!requested_permissions) return false;
+    PendingPermission pending;
+    pending.prompt = callback;
+    pending.promptId = prompt_id;
+    askPermission(browser, OriginOf(requesting_origin.ToString()), requested_permissions, pending);
     return true;
-#else
-    return false;
-#endif
+}
+
+void WebviewHandler::OnDismissPermissionPrompt(CefRefPtr<CefBrowser> browser,
+                                               uint64_t prompt_id,
+                                               cef_permission_request_result_t result) {
+    CEF_REQUIRE_UI_THREAD();
+    // Also called after our own answer; then nothing is pending any more.
+    const int browserId = browser->GetIdentifier();
+    for (auto it = pending_permissions_.begin(); it != pending_permissions_.end(); ++it) {
+        if (it->second.prompt && it->second.promptId == prompt_id &&
+            it->second.browserId == browserId) {
+            const int id = it->first;
+            pending_permissions_.erase(it);
+            if (onPermissionDismissedEvent) onPermissionDismissedEvent(browserId, id);
+            return;
+        }
+    }
+}
+
+void WebviewHandler::setSitePermission(const std::string& origin, uint32_t permissions, int value) {
+    if (!CefCurrentlyOn(TID_UI)) {
+        CefPostTask(TID_UI, base::BindOnce(&WebviewHandler::setSitePermission, this, origin, permissions, value));
+        return;
+    }
+    static const std::pair<uint32_t, cef_content_setting_types_t> kSettings[] = {
+        {CEF_PERMISSION_TYPE_CAMERA_STREAM, CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA},
+        {CEF_PERMISSION_TYPE_MIC_STREAM, CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC},
+        {CEF_PERMISSION_TYPE_CAMERA_PAN_TILT_ZOOM, CEF_CONTENT_SETTING_TYPE_CAMERA_PAN_TILT_ZOOM},
+        {CEF_PERMISSION_TYPE_GEOLOCATION, CEF_CONTENT_SETTING_TYPE_GEOLOCATION},
+        {CEF_PERMISSION_TYPE_CLIPBOARD, CEF_CONTENT_SETTING_TYPE_CLIPBOARD_READ_WRITE},
+        {CEF_PERMISSION_TYPE_MIDI_SYSEX, CEF_CONTENT_SETTING_TYPE_MIDI_SYSEX},
+        {CEF_PERMISSION_TYPE_MULTIPLE_DOWNLOADS, CEF_CONTENT_SETTING_TYPE_AUTOMATIC_DOWNLOADS},
+        {CEF_PERMISSION_TYPE_WINDOW_MANAGEMENT, CEF_CONTENT_SETTING_TYPE_WINDOW_MANAGEMENT},
+        {CEF_PERMISSION_TYPE_LOCAL_FONTS, CEF_CONTENT_SETTING_TYPE_LOCAL_FONTS},
+        {CEF_PERMISSION_TYPE_IDLE_DETECTION, CEF_CONTENT_SETTING_TYPE_IDLE_DETECTION},
+        {CEF_PERMISSION_TYPE_SENSORS, CEF_CONTENT_SETTING_TYPE_SENSORS},
+        {CEF_PERMISSION_TYPE_LOCAL_NETWORK_ACCESS, CEF_CONTENT_SETTING_TYPE_LOCAL_NETWORK_ACCESS},
+    };
+    if (value != CEF_CONTENT_SETTING_VALUE_DEFAULT && value != CEF_CONTENT_SETTING_VALUE_ALLOW &&
+        value != CEF_CONTENT_SETTING_VALUE_BLOCK) {
+        return;
+    }
+    auto context = CefRequestContext::GetGlobalContext();
+    if (!context) return;
+    const CefString url(origin + "/");
+    for (const auto& [kind, type] : kSettings) {
+        if (permissions & kind) {
+            context->SetContentSetting(url, url, type, static_cast<cef_content_setting_values_t>(value));
+        }
+    }
+}
+
+// ---- Screen sharing ----
+
+void WebviewHandler::answerCapturePick(CefRefPtr<CefBrowser> browser, const CapturePick& pick,
+                                       const std::string& sourceId, bool audio) {
+    const int browserId = browser->GetIdentifier();
+    if (!sourceId.empty()) {
+        capture_grants_[browserId] = {pick.frameId,
+                                      std::chrono::steady_clock::now() + kCaptureGrantLifetime};
+        if (audio) audio_allowed_[browserId] = pick.frameId;
+        else audio_allowed_.erase(browserId);
+    }
+    auto frame = browser->GetFrameByIdentifier(pick.frameId);
+    if (!frame) return;
+    CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(kCapturePickedMessage);
+    auto args = message->GetArgumentList();
+    args->SetInt(0, pick.requestId);
+    args->SetString(1, sourceId);
+    args->SetBool(2, audio);
+    args->SetString(3, SurfaceOf(sourceId));
+    frame->SendProcessMessage(PID_RENDERER, message);
+}
+
+void WebviewHandler::cancelCapturePick(int browserId) {
+    auto it = capture_picks_.find(browserId);
+    if (it == capture_picks_.end()) return;
+    const CapturePick pick = it->second;
+    capture_picks_.erase(it);
+    auto browser = browser_map_.find(browserId);
+    if (browser != browser_map_.end() && browser->second.browser) {
+        answerCapturePick(browser->second.browser, pick, "", false);
+    }
+    if (onScreenShareCancelledEvent) onScreenShareCancelledEvent(browserId);
+}
+
+void WebviewHandler::respondScreenShare(int browserId, const std::string& sourceId, bool audio) {
+    if (!CefCurrentlyOn(TID_UI)) {
+        CefPostTask(TID_UI, base::BindOnce(&WebviewHandler::respondScreenShare, this, browserId, sourceId, audio));
+        return;
+    }
+    auto it = capture_picks_.find(browserId);
+    if (it == capture_picks_.end()) return;
+    const CapturePick pick = it->second;
+    capture_picks_.erase(it);
+    auto browser = browser_map_.find(browserId);
+    if (browser == browser_map_.end() || !browser->second.browser) return;
+    const std::string id = ValidSourceId(sourceId) ? sourceId : "";
+    answerCapturePick(browser->second.browser, pick, id, audio && pick.audioOffered && !id.empty());
+}
+
+void WebviewHandler::startSystemAudio(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame) {
+    const int browserId = browser->GetIdentifier();
+    const std::string frameId = frame->GetIdentifier().ToString();
+    // Only after the user ticked "Also share system audio" for this frame.
+    auto allowed = audio_allowed_.find(browserId);
+    if (allowed == audio_allowed_.end() || allowed->second != frameId) return;
+    audio_allowed_.erase(allowed);
+    stopSystemAudio(browserId);
+
+    auto session = std::make_shared<AudioSession>();
+    session->id = next_audio_session_++;
+    session->frameId = frameId;
+    CefRefPtr<WebviewHandler> self(this);
+    const int sessionId = session->id;
+    session->capture = std::make_unique<SystemAudioCapture>(
+        [self, browserId, sessionId](std::vector<int16_t> pcm) {
+            CefPostTask(TID_UI, base::BindOnce(
+                [](CefRefPtr<WebviewHandler> handler, int browser_id, int session_id,
+                   std::vector<int16_t> samples) {
+                    handler->sendAudioChunk(browser_id, session_id, std::move(samples));
+                },
+                self, browserId, sessionId, std::move(pcm)));
+        });
+    if (!session->capture->Start()) return;
+    audio_sessions_[browserId] = session;
+}
+
+void WebviewHandler::sendAudioChunk(int browserId, int sessionId, std::vector<int16_t> pcm) {
+    auto session = audio_sessions_.find(browserId);
+    if (session == audio_sessions_.end() || session->second->id != sessionId) return;
+    auto browser = browser_map_.find(browserId);
+    CefRefPtr<CefFrame> frame;
+    if (browser != browser_map_.end() && browser->second.browser) {
+        frame = browser->second.browser->GetFrameByIdentifier(session->second->frameId);
+    }
+    if (!frame) {
+        stopSystemAudio(browserId);
+        return;
+    }
+    CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(kCaptureChunkMessage);
+    message->GetArgumentList()->SetBinary(
+        0, CefBinaryValue::Create(pcm.data(), pcm.size() * sizeof(int16_t)));
+    frame->SendProcessMessage(PID_RENDERER, message);
+}
+
+void WebviewHandler::stopSystemAudio(int browserId) {
+    auto session = audio_sessions_.find(browserId);
+    if (session == audio_sessions_.end()) return;
+    auto stopping = session->second;
+    audio_sessions_.erase(session);
+    if (stopping->capture) stopping->capture->Stop();
+}
+
+void WebviewHandler::forgetBrowserRequests(int browserId) {
+    for (auto it = pending_permissions_.begin(); it != pending_permissions_.end();) {
+        if (it->second.browserId == browserId) it = pending_permissions_.erase(it);
+        else ++it;
+    }
+    for (auto it = pending_dialogs_.begin(); it != pending_dialogs_.end();) {
+        if (it->second.browserId == browserId) it = pending_dialogs_.erase(it);
+        else ++it;
+    }
+    capture_picks_.erase(browserId);
+    capture_grants_.erase(browserId);
+    audio_allowed_.erase(browserId);
+    stopSystemAudio(browserId);
+}
+
+// ---- Page dialogs (alert, confirm, prompt, "Leave site?") ----
+
+bool WebviewHandler::OnJSDialog(CefRefPtr<CefBrowser> browser,
+                                const CefString& origin_url,
+                                JSDialogType dialog_type,
+                                const CefString& message_text,
+                                const CefString& default_prompt_text,
+                                CefRefPtr<CefJSDialogCallback> callback,
+                                bool& suppress_message) {
+    CEF_REQUIRE_UI_THREAD();
+    if (!onJsDialogEvent) return false;
+    const int id = next_dialog_id_++;
+    pending_dialogs_[id] = {browser->GetIdentifier(), callback};
+    onJsDialogEvent(browser->GetIdentifier(), id, static_cast<int>(dialog_type),
+                    OriginOf(origin_url.ToString()), message_text.ToString(),
+                    default_prompt_text.ToString(), false);
+    return true;
+}
+
+bool WebviewHandler::OnBeforeUnloadDialog(CefRefPtr<CefBrowser> browser,
+                                          const CefString& message_text,
+                                          bool is_reload,
+                                          CefRefPtr<CefJSDialogCallback> callback) {
+    CEF_REQUIRE_UI_THREAD();
+    if (!onJsDialogEvent) return false;
+    const int id = next_dialog_id_++;
+    pending_dialogs_[id] = {browser->GetIdentifier(), callback};
+    auto main = browser->GetMainFrame();
+    onJsDialogEvent(browser->GetIdentifier(), id, 3,
+                    main ? OriginOf(main->GetURL().ToString()) : "",
+                    message_text.ToString(), "", is_reload);
+    return true;
+}
+
+void WebviewHandler::OnResetDialogState(CefRefPtr<CefBrowser> browser) {
+    CEF_REQUIRE_UI_THREAD();
+    // Navigation and the like cancel the page's open dialogs (CEF runs the
+    // dropped callbacks as "cancel").
+    const int browserId = browser->GetIdentifier();
+    bool had = false;
+    for (auto it = pending_dialogs_.begin(); it != pending_dialogs_.end();) {
+        if (it->second.browserId == browserId) {
+            it = pending_dialogs_.erase(it);
+            had = true;
+        } else {
+            ++it;
+        }
+    }
+    if (had && onJsDialogsClosedEvent) onJsDialogsClosedEvent(browserId);
+}
+
+void WebviewHandler::respondJsDialog(int requestId, bool ok, const std::string& text) {
+    if (!CefCurrentlyOn(TID_UI)) {
+        CefPostTask(TID_UI, base::BindOnce(&WebviewHandler::respondJsDialog, this, requestId, ok, text));
+        return;
+    }
+    auto it = pending_dialogs_.find(requestId);
+    if (it == pending_dialogs_.end()) return;
+    auto callback = it->second.callback;
+    pending_dialogs_.erase(it);
+    if (callback) callback->Continue(ok, text);
 }
 
 bool WebviewHandler::OnProcessMessageReceived(
@@ -202,6 +469,37 @@ bool WebviewHandler::OnProcessMessageReceived(
 
         onJavaScriptChannelMessage(
             fun_name,param,stringpatch::to_string(js_callback_id), browser->GetIdentifier(), frame->GetIdentifier().ToString());
+    }
+    else if (message_name == kCapturePickMessage) {
+        // 6browser patch: the page called getDisplayMedia (webview_app.cc).
+        CEF_REQUIRE_UI_THREAD();
+        auto args = message->GetArgumentList();
+        const int browserId = browser->GetIdentifier();
+        CapturePick pick;
+        pick.frameId = frame->GetIdentifier().ToString();
+        pick.requestId = args->GetInt(0);
+        pick.audioOffered = args->GetBool(1) && systemAudioSupported();
+        if (capture_picks_.count(browserId) || !onScreenShareEvent) {
+            // One picker per tab.
+            answerCapturePick(browser, pick, "", false);
+        } else {
+            capture_picks_[browserId] = pick;
+            onScreenShareEvent(browserId, OriginOf(frame->GetURL().ToString()), pick.audioOffered);
+        }
+        return true;
+    }
+    else if (message_name == kCaptureAudioMessage) {
+        CEF_REQUIRE_UI_THREAD();
+        if (message->GetArgumentList()->GetBool(0)) {
+            startSystemAudio(browser, frame);
+        } else {
+            auto session = audio_sessions_.find(browser->GetIdentifier());
+            if (session != audio_sessions_.end() &&
+                session->second->frameId == frame->GetIdentifier().ToString()) {
+                stopSystemAudio(browser->GetIdentifier());
+            }
+        }
+        return true;
     }
     else if(message_name == kEvaluateCallbackMessage){
         CefString callbackId = message->GetArgumentList()->GetString(0);
@@ -336,6 +634,7 @@ bool WebviewHandler::DoClose(CefRefPtr<CefBrowser> browser) {
 
 void WebviewHandler::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
     CEF_REQUIRE_UI_THREAD();
+    forgetBrowserRequests(browser->GetIdentifier());
 }
 
 bool WebviewHandler::OnBeforePopup(CefRefPtr<CefBrowser> browser,
@@ -547,6 +846,19 @@ void WebviewHandler::OnLoadError(CefRefPtr<CefBrowser> browser,
 
 void WebviewHandler::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                                  CefLoadHandler::TransitionType transition_type) {
+    // 6browser patch: a page that goes away ends its screen share requests
+    // and its system audio.
+    const int browserId = browser->GetIdentifier();
+    auto session = audio_sessions_.find(browserId);
+    if (session != audio_sessions_.end() &&
+        (frame->IsMain() || session->second->frameId == frame->GetIdentifier().ToString())) {
+        stopSystemAudio(browserId);
+    }
+    if (frame->IsMain()) {
+        cancelCapturePick(browserId);
+        capture_grants_.erase(browserId);
+        audio_allowed_.erase(browserId);
+    }
 }
 
 // 6browser patch: the host's load start/end follow the whole tab, as the
@@ -601,6 +913,7 @@ void WebviewHandler::closeBrowser(int browserId)
         return;
     }
     if (focused_browser_id_ == browserId) focused_browser_id_ = 0;
+    forgetBrowserRequests(browserId);
     auto it = browser_map_.find(browserId);
     if(it != browser_map_.end()){
         it->second.browser->GetHost()->CloseBrowser(true);

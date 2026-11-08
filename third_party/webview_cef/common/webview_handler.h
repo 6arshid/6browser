@@ -10,8 +10,11 @@
 
 #include <functional>
 #include <list>
+#include <memory>
 #include <set>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "webview_cookieVisitor.h"
 
@@ -78,6 +81,7 @@ public CefPermissionHandler,
 public CefFindHandler,
 public CefRequestHandler,
 public CefKeyboardHandler,
+public CefJSDialogHandler,
 public CefRenderHandler{
 public:
     //Paint callback (software off-screen rendering)
@@ -119,7 +123,23 @@ public:
     // 6browser patch: a key press the page did not handle (Windows virtual
     // key code, CEF modifier flags), for the host's shortcuts.
     std::function<void(int browserId, int keyCode, int modifiers)> onUnhandledKeyEvent;
-    
+    // 6browser patch: a site asks for permissions (cef_permission_request_types_t
+    // bits; camera/microphone requests use CAMERA_STREAM/MIC_STREAM). The host
+    // answers with respondPermission(requestId, ...). A request can be
+    // withdrawn (navigation, tab closed): onPermissionDismissedEvent.
+    std::function<void(int browserId, int requestId, std::string origin, uint32_t permissions)> onPermissionRequestEvent;
+    std::function<void(int browserId, int requestId)> onPermissionDismissedEvent;
+    // 6browser patch: getDisplayMedia. The host shows its screen/window picker
+    // and answers with respondScreenShare(browserId, sourceId, audio).
+    // |audioOffered|: the page asked for audio and system audio can be shared.
+    std::function<void(int browserId, std::string origin, bool audioOffered)> onScreenShareEvent;
+    std::function<void(int browserId)> onScreenShareCancelledEvent;
+    // 6browser patch: alert / confirm / prompt / beforeunload. |type|:
+    // cef_jsdialog_type_t, or 3 for "leave site?" (|isReload|: "reload site?").
+    // The host answers with respondJsDialog(requestId, ...).
+    std::function<void(int browserId, int requestId, int type, std::string origin, std::string message, std::string defaultText, bool isReload)> onJsDialogEvent;
+    std::function<void(int browserId)> onJsDialogsClosedEvent;
+
     explicit WebviewHandler();
     ~WebviewHandler();
     
@@ -157,6 +177,35 @@ public:
         const CefString& requesting_origin,
         uint32_t requested_permissions,
         CefRefPtr<CefPermissionPromptCallback> callback) override;
+    void OnDismissPermissionPrompt(CefRefPtr<CefBrowser> browser,
+                                   uint64_t prompt_id,
+                                   cef_permission_request_result_t result) override;
+
+    // CefJSDialogHandler methods (6browser patch): the host draws the dialogs.
+    CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
+    bool OnJSDialog(CefRefPtr<CefBrowser> browser,
+                    const CefString& origin_url,
+                    JSDialogType dialog_type,
+                    const CefString& message_text,
+                    const CefString& default_prompt_text,
+                    CefRefPtr<CefJSDialogCallback> callback,
+                    bool& suppress_message) override;
+    bool OnBeforeUnloadDialog(CefRefPtr<CefBrowser> browser,
+                              const CefString& message_text,
+                              bool is_reload,
+                              CefRefPtr<CefJSDialogCallback> callback) override;
+    void OnResetDialogState(CefRefPtr<CefBrowser> browser) override;
+
+    // 6browser patch: the host's answers. |result|: 0 dismissed (closed
+    // without answering), 1 allowed, 2 blocked.
+    void respondPermission(int requestId, int result);
+    // |sourceId|: "screen:<index>:0" or "window:<HWND>:0"; empty cancels.
+    void respondScreenShare(int browserId, const std::string& sourceId, bool audio);
+    void respondJsDialog(int requestId, bool ok, const std::string& text);
+    // Mirrors a decision changed in the host's settings into Chromium's own
+    // per-site settings. |value|: cef_content_setting_values_t.
+    void setSitePermission(const std::string& origin, uint32_t permissions, int value);
+    static bool systemAudioSupported();
 
     // CefContextMenuHandler methods (6browser patch):
     void OnBeforeContextMenu(CefRefPtr<CefBrowser> browser,
@@ -363,6 +412,55 @@ private:
     CefRefPtr<CefRequestContext> m_incognitoContext;
 
     std::unordered_map<std::string, std::function<void(CefRefPtr<CefValue>)>> js_callbacks_;
+
+    // ---- 6browser patch: permissions, screen sharing, page dialogs ----
+    // All on the CEF UI thread.
+    struct PendingPermission {
+        int browserId = 0;
+        uint32_t permissions = 0;                       // as sent to the host
+        uint32_t mediaRequested = 0;                    // cef_media_access_permission_types_t
+        CefRefPtr<CefMediaAccessCallback> media;
+        CefRefPtr<CefPermissionPromptCallback> prompt;
+        uint64_t promptId = 0;
+    };
+    std::unordered_map<int, PendingPermission> pending_permissions_;
+    int next_permission_id_ = 1;
+    int askPermission(CefRefPtr<CefBrowser> browser, const std::string& origin,
+                      uint32_t permissions, PendingPermission pending);
+
+    // getDisplayMedia from the page's shim (webview_app.cc): one open picker
+    // per tab, then a one-time grant for the capture that follows.
+    struct CapturePick {
+        std::string frameId;
+        int requestId = 0;
+        bool audioOffered = false;
+    };
+    std::unordered_map<int, CapturePick> capture_picks_;
+    struct CaptureGrant {
+        std::string frameId;
+        std::chrono::steady_clock::time_point expires;
+    };
+    std::unordered_map<int, CaptureGrant> capture_grants_;
+    // Frame allowed to start system audio, per tab (the user ticked "Also
+    // share system audio").
+    std::unordered_map<int, std::string> audio_allowed_;
+    struct AudioSession;
+    std::unordered_map<int, std::shared_ptr<AudioSession>> audio_sessions_;
+    void answerCapturePick(CefRefPtr<CefBrowser> browser, const CapturePick& pick,
+                           const std::string& sourceId, bool audio);
+    void cancelCapturePick(int browserId);
+    void startSystemAudio(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame);
+    void stopSystemAudio(int browserId);
+    void sendAudioChunk(int browserId, int sessionId, std::vector<int16_t> pcm);
+    int next_audio_session_ = 1;
+    void forgetBrowserRequests(int browserId);
+
+    struct PendingDialog {
+        int browserId = 0;
+        CefRefPtr<CefJSDialogCallback> callback;
+    };
+    std::unordered_map<int, PendingDialog> pending_dialogs_;
+    int next_dialog_id_ = 1;
 
 #ifdef WEBVIEW_CEF_GPU_TEXTURE
     // GPU diagnostic state: whether any accelerated-paint frame has arrived, and

@@ -2479,6 +2479,330 @@ class NeverSavePasswordsCompanion extends UpdateCompanion<NeverSavePassword> {
   }
 }
 
+class $SitePermissionsTable extends SitePermissions
+    with TableInfo<$SitePermissionsTable, SitePermissionRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SitePermissionsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _originMeta = const VerificationMeta('origin');
+  @override
+  late final GeneratedColumn<String> origin = GeneratedColumn<String>(
+    'origin',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _permissionMeta = const VerificationMeta(
+    'permission',
+  );
+  @override
+  late final GeneratedColumn<String> permission = GeneratedColumn<String>(
+    'permission',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _allowedMeta = const VerificationMeta(
+    'allowed',
+  );
+  @override
+  late final GeneratedColumn<bool> allowed = GeneratedColumn<bool>(
+    'allowed',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("allowed" IN (0, 1))',
+    ),
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    origin,
+    permission,
+    allowed,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'site_permissions';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<SitePermissionRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('origin')) {
+      context.handle(
+        _originMeta,
+        origin.isAcceptableOrUnknown(data['origin']!, _originMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_originMeta);
+    }
+    if (data.containsKey('permission')) {
+      context.handle(
+        _permissionMeta,
+        permission.isAcceptableOrUnknown(data['permission']!, _permissionMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_permissionMeta);
+    }
+    if (data.containsKey('allowed')) {
+      context.handle(
+        _allowedMeta,
+        allowed.isAcceptableOrUnknown(data['allowed']!, _allowedMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_allowedMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {origin, permission};
+  @override
+  SitePermissionRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SitePermissionRow(
+      origin: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}origin'],
+      )!,
+      permission: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}permission'],
+      )!,
+      allowed: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}allowed'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $SitePermissionsTable createAlias(String alias) {
+    return $SitePermissionsTable(attachedDatabase, alias);
+  }
+}
+
+class SitePermissionRow extends DataClass
+    implements Insertable<SitePermissionRow> {
+  final String origin;
+  final String permission;
+  final bool allowed;
+  final DateTime updatedAt;
+  const SitePermissionRow({
+    required this.origin,
+    required this.permission,
+    required this.allowed,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['origin'] = Variable<String>(origin);
+    map['permission'] = Variable<String>(permission);
+    map['allowed'] = Variable<bool>(allowed);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  SitePermissionsCompanion toCompanion(bool nullToAbsent) {
+    return SitePermissionsCompanion(
+      origin: Value(origin),
+      permission: Value(permission),
+      allowed: Value(allowed),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory SitePermissionRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SitePermissionRow(
+      origin: serializer.fromJson<String>(json['origin']),
+      permission: serializer.fromJson<String>(json['permission']),
+      allowed: serializer.fromJson<bool>(json['allowed']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'origin': serializer.toJson<String>(origin),
+      'permission': serializer.toJson<String>(permission),
+      'allowed': serializer.toJson<bool>(allowed),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  SitePermissionRow copyWith({
+    String? origin,
+    String? permission,
+    bool? allowed,
+    DateTime? updatedAt,
+  }) => SitePermissionRow(
+    origin: origin ?? this.origin,
+    permission: permission ?? this.permission,
+    allowed: allowed ?? this.allowed,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  SitePermissionRow copyWithCompanion(SitePermissionsCompanion data) {
+    return SitePermissionRow(
+      origin: data.origin.present ? data.origin.value : this.origin,
+      permission: data.permission.present
+          ? data.permission.value
+          : this.permission,
+      allowed: data.allowed.present ? data.allowed.value : this.allowed,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SitePermissionRow(')
+          ..write('origin: $origin, ')
+          ..write('permission: $permission, ')
+          ..write('allowed: $allowed, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(origin, permission, allowed, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SitePermissionRow &&
+          other.origin == this.origin &&
+          other.permission == this.permission &&
+          other.allowed == this.allowed &&
+          other.updatedAt == this.updatedAt);
+}
+
+class SitePermissionsCompanion extends UpdateCompanion<SitePermissionRow> {
+  final Value<String> origin;
+  final Value<String> permission;
+  final Value<bool> allowed;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const SitePermissionsCompanion({
+    this.origin = const Value.absent(),
+    this.permission = const Value.absent(),
+    this.allowed = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SitePermissionsCompanion.insert({
+    required String origin,
+    required String permission,
+    required bool allowed,
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : origin = Value(origin),
+       permission = Value(permission),
+       allowed = Value(allowed),
+       updatedAt = Value(updatedAt);
+  static Insertable<SitePermissionRow> custom({
+    Expression<String>? origin,
+    Expression<String>? permission,
+    Expression<bool>? allowed,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (origin != null) 'origin': origin,
+      if (permission != null) 'permission': permission,
+      if (allowed != null) 'allowed': allowed,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SitePermissionsCompanion copyWith({
+    Value<String>? origin,
+    Value<String>? permission,
+    Value<bool>? allowed,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return SitePermissionsCompanion(
+      origin: origin ?? this.origin,
+      permission: permission ?? this.permission,
+      allowed: allowed ?? this.allowed,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (origin.present) {
+      map['origin'] = Variable<String>(origin.value);
+    }
+    if (permission.present) {
+      map['permission'] = Variable<String>(permission.value);
+    }
+    if (allowed.present) {
+      map['allowed'] = Variable<bool>(allowed.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SitePermissionsCompanion(')
+          ..write('origin: $origin, ')
+          ..write('permission: $permission, ')
+          ..write('allowed: $allowed, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2491,6 +2815,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $LoginsTable logins = $LoginsTable(this);
   late final $NeverSavePasswordsTable neverSavePasswords =
       $NeverSavePasswordsTable(this);
+  late final $SitePermissionsTable sitePermissions = $SitePermissionsTable(
+    this,
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2504,6 +2831,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     hiddenSites,
     logins,
     neverSavePasswords,
+    sitePermissions,
   ];
 }
 
@@ -3971,6 +4299,204 @@ typedef $$NeverSavePasswordsTableProcessedTableManager =
       NeverSavePassword,
       PrefetchHooks Function()
     >;
+typedef $$SitePermissionsTableCreateCompanionBuilder =
+    SitePermissionsCompanion Function({
+      required String origin,
+      required String permission,
+      required bool allowed,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$SitePermissionsTableUpdateCompanionBuilder =
+    SitePermissionsCompanion Function({
+      Value<String> origin,
+      Value<String> permission,
+      Value<bool> allowed,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$SitePermissionsTableFilterComposer
+    extends Composer<_$AppDatabase, $SitePermissionsTable> {
+  $$SitePermissionsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get origin => $composableBuilder(
+    column: $table.origin,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get permission => $composableBuilder(
+    column: $table.permission,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get allowed => $composableBuilder(
+    column: $table.allowed,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$SitePermissionsTableOrderingComposer
+    extends Composer<_$AppDatabase, $SitePermissionsTable> {
+  $$SitePermissionsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get origin => $composableBuilder(
+    column: $table.origin,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get permission => $composableBuilder(
+    column: $table.permission,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get allowed => $composableBuilder(
+    column: $table.allowed,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$SitePermissionsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SitePermissionsTable> {
+  $$SitePermissionsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get origin =>
+      $composableBuilder(column: $table.origin, builder: (column) => column);
+
+  GeneratedColumn<String> get permission => $composableBuilder(
+    column: $table.permission,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get allowed =>
+      $composableBuilder(column: $table.allowed, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$SitePermissionsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $SitePermissionsTable,
+          SitePermissionRow,
+          $$SitePermissionsTableFilterComposer,
+          $$SitePermissionsTableOrderingComposer,
+          $$SitePermissionsTableAnnotationComposer,
+          $$SitePermissionsTableCreateCompanionBuilder,
+          $$SitePermissionsTableUpdateCompanionBuilder,
+          (
+            SitePermissionRow,
+            BaseReferences<
+              _$AppDatabase,
+              $SitePermissionsTable,
+              SitePermissionRow
+            >,
+          ),
+          SitePermissionRow,
+          PrefetchHooks Function()
+        > {
+  $$SitePermissionsTableTableManager(
+    _$AppDatabase db,
+    $SitePermissionsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SitePermissionsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SitePermissionsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$SitePermissionsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> origin = const Value.absent(),
+                Value<String> permission = const Value.absent(),
+                Value<bool> allowed = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SitePermissionsCompanion(
+                origin: origin,
+                permission: permission,
+                allowed: allowed,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String origin,
+                required String permission,
+                required bool allowed,
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => SitePermissionsCompanion.insert(
+                origin: origin,
+                permission: permission,
+                allowed: allowed,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$SitePermissionsTable, SitePermissionRow>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $SitePermissionsTable,
+                    SitePermissionRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$SitePermissionsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $SitePermissionsTable,
+      SitePermissionRow,
+      $$SitePermissionsTableFilterComposer,
+      $$SitePermissionsTableOrderingComposer,
+      $$SitePermissionsTableAnnotationComposer,
+      $$SitePermissionsTableCreateCompanionBuilder,
+      $$SitePermissionsTableUpdateCompanionBuilder,
+      (
+        SitePermissionRow,
+        BaseReferences<_$AppDatabase, $SitePermissionsTable, SitePermissionRow>,
+      ),
+      SitePermissionRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -3991,4 +4517,6 @@ class $AppDatabaseManager {
       $$LoginsTableTableManager(_db, _db.logins);
   $$NeverSavePasswordsTableTableManager get neverSavePasswords =>
       $$NeverSavePasswordsTableTableManager(_db, _db.neverSavePasswords);
+  $$SitePermissionsTableTableManager get sitePermissions =>
+      $$SitePermissionsTableTableManager(_db, _db.sitePermissions);
 }

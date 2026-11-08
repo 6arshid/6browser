@@ -61,6 +61,8 @@ add_library(${PLUGIN_NAME} SHARED
   "${CMAKE_CURRENT_SOURCE_DIR}/../common/webview_js_handler.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/../common/webview_cookieVisitor.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/../common/webview_cookieVisitor.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../common/system_audio_win.cc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../common/system_audio_win.h"
 )
 
 # Apply a standard set of build settings that are configured in the

@@ -96,21 +96,83 @@ Verified by inspecting the command lines of the running browser6.exe processes.
 therefore unsandboxed; this must be revisited before any public release.
 When upgrading webview_cef, re-apply the patch (search for `6browser patch`).
 
-## Camera and microphone (Windows)
+## Site permissions, page dialogs and screen sharing (2026-11-08)
 
-Alloy denies media requests by default. The vendored `WebviewHandler` now
-registers a `CefPermissionHandler` and shows a native Yes/No prompt containing
-the requesting origin and the requested devices. Yes grants precisely the
-requested camera/microphone permissions; No or closing the prompt denies them.
-Decisions are not saved, including in private tabs. Screen capture remains
-unsupported because it needs a source picker. Other platforms retain CEF's
-default behavior.
+Replaces the native MessageBox prompts of 2026-10. Everything a page asks the
+user is forwarded to Flutter and drawn in 6browser's style
+(`lib/features/site_permissions`, `screen_share`, `page_dialogs`; one
+`SiteRequestsHost` per tab).
 
-Manual verification on HTTPS or localhost: request audio only, video only, and
-both with `navigator.mediaDevices.getUserMedia`; verify Yes returns the requested
-tracks, No rejects with `NotAllowedError`, and a subsequent request prompts
-again. Stop the returned tracks after testing. Repeat in a private tab. Windows
-privacy settings must also allow desktop apps to access the devices.
+**Permissions.** `OnShowPermissionPrompt` (Chromium's prompt layer) and
+`OnRequestMediaAccessPermission` (the device request that follows for
+getUserMedia, asked again on every call) both become
+`onPermissionRequest(requestId, origin, cef_permission_request_types_t bits)`;
+device bits are mapped to CAMERA_STREAM / MIC_STREAM so the app sees one
+vocabulary. The app answers from the `SitePermissions` table (schema v5) or
+shows "<site> wants to ... Block / Allow" and saves the answer *before*
+replying, so the device request right after the prompt is answered from the
+table. Closing the prompt (X) refuses this time only. Kinds the engine cannot
+deliver (notifications, VR...) are dismissed without asking. Private tabs keep
+answers in memory until 6browser closes; saved blocks apply there too.
+Chromium persists prompt answers itself (Accept/Deny are not one-time), so
+changes made under Settings > Site permissions are mirrored with
+`CefRequestContext::SetContentSetting` (`setSitePermission`). Old Chromium-side
+blocks from the MessageBox era (user clicked No) still block until changed.
+
+**Page dialogs.** A `CefJSDialogHandler` sends alert/confirm/prompt and
+beforeunload ("Leave site?" / "Reload site?") to the app; `OnResetDialogState`
+withdraws them. Tabs close with `CloseBrowser(true)`, so beforeunload never
+blocks closing a tab.
+
+**Screen sharing.** Alloy has no source picker: `getDisplayMedia` captured the
+whole desktop (`media_access_query.cc` uses `screen:-1` when no device id is
+given), and its system audio is a plain endpoint `"loopback"` (hard-coded for
+desktop audio) that contains this browser's own playback, so people in a
+Google Meet call heard themselves (why audio was refused until now). Now:
+
+- `webview_app.cc` injects `kScreenShareShim` into every frame before page
+  scripts run. It replaces `MediaDevices.prototype.getDisplayMedia`; its
+  native functions (`pick`, `audio`) are passed into a closure, never exposed
+  to the page. Measured in-app: at `OnContextCreated` Blink has not yet
+  exposed secure-context APIs. `navigator.mediaDevices` exists by the first
+  microtask, `window.MediaDevices`, `CaptureController` and
+  `documentPictureInPicture` only a task later. The shim therefore takes the
+  prototype from `navigator.mediaDevices` and retries (microtask, then
+  `setTimeout 0`). The video Picture-in-Picture shim of 2026-10-25 had the
+  same problem (it returned early on every page) and now retries too.
+- Without a `CefJSDialogHandler`, OSR browsers cancelled every alert/confirm/
+  prompt ("Default dialog implementation requires a parent window handle"),
+  so page dialogs were silently broken before this change.
+- `pick` asks the browser process, which shows the Flutter picker (screens and
+  windows with live thumbnails from `capture_sources.dart`, Win32 GDI in an
+  isolate). Ids are Chromium's `DesktopMediaID` strings: `screen:<index of
+  the active display in EnumDisplayDevices>:0` (webrtc's numbering, also used
+  by its WGC screen capturer) or `window:<HWND>:0`.
+- The shim then calls the original getUserMedia with the legacy
+  `{chromeMediaSource: 'desktop', chromeMediaSourceId}` constraints, which CEF
+  parses with `DesktopMediaID::Parse`. The browser allows exactly one desktop
+  request per pick (same tab and frame, within 10 s, video only); any other
+  desktop request is refused and closes an open picker, so a page cannot slip
+  in its own source id (e.g. the whole screen when the user chose a window).
+- "Also share system audio": `system_audio_win.cc` captures with Windows
+  process loopback, *excluding* this process tree (as Chrome's
+  `loopbackWithoutChrome` does for `restrictOwnAudio`). Needs build 20348+;
+  the checkbox is hidden elsewhere. 20 ms chunks of 48 kHz stereo s16 go to
+  the frame as process messages; the shim schedules them into a
+  MediaStreamAudioDestinationNode 150 ms ahead and adds that track to the
+  stream. Stopping the audio track, the video ending, navigation or closing
+  the tab stops the capture. Limitation: sound from other 6browser tabs is
+  left out too (Chrome's own system audio with restrictOwnAudio behaves the
+  same).
+
+Tests: `test/site_permissions_test.dart`, `test/screen_share_test.dart`,
+`test/page_dialogs_test.dart`, `node --test tool/desktop_screen_share_test.cjs`
+(the shim), and `integration_test/site_requests_test.dart` (real engine: build
+with `flutter build windows --profile -t integration_test/site_requests_test.dart`,
+copy `6browser.exe` to `browser6.exe` in the Profile folder, then
+`flutter drive --profile -d windows --driver=test_driver/integration_test.dart
+--target=integration_test/site_requests_test.dart`). Windows privacy settings
+must allow desktop apps to use the camera and microphone.
 
 ## Downloads (step 5)
 

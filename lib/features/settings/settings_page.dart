@@ -6,6 +6,7 @@ import '../passwords/password_store.dart';
 import '../passwords/passwords_page.dart';
 import '../profiles/profiles.dart';
 import '../profiles/profiles_page.dart';
+import '../site_permissions/site_permissions_page.dart';
 import '../tabs/tabs_controller.dart';
 import '../voice/voice_panel.dart';
 import '../voice/voice_settings.dart';
@@ -200,6 +201,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   icon: Icons.key_outlined,
                   title: 'Passwords',
                   child: _PasswordSettings(settings: s),
+                ),
+                const _Section(
+                  icon: Icons.tune,
+                  title: 'Site permissions',
+                  child: SitePermissionsSettings(),
                 ),
                 _Section(
                   icon: Icons.shield_outlined,

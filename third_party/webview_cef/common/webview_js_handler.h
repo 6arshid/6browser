@@ -13,6 +13,15 @@ static const char kJSCallCppFunctionMessage[] = "JSCallCppFunction";		 //js call
 static const char kExecuteJsCallbackMessage[] = "ExecuteJsCallback";		 //c++ call js message
 static const char kEvaluateCallbackMessage[] = "EvaluateCallback";		 //js callback c++ message
 static const char kFocusedNodeChangedMessage[] = "FocusedNodeChanged";		 //elements that capture focus in web pages changed message
+// 6browser patch: the getDisplayMedia shim (webview_app.cc) and the browser.
+// pick: renderer -> browser [requestId, audio wanted]; the host shows its picker.
+// picked: browser -> renderer [requestId, source id ("" = cancelled), audio, surface].
+// audio: renderer -> browser [start]; starts or stops system audio for the frame.
+// chunk: browser -> renderer [binary: 48 kHz stereo 16-bit PCM].
+static const char kCapturePickMessage[] = "6b.capture.pick";
+static const char kCapturePickedMessage[] = "6b.capture.picked";
+static const char kCaptureAudioMessage[] = "6b.capture.audio";
+static const char kCaptureChunkMessage[] = "6b.capture.chunk";
 
 struct JSValue {
     enum class Type { STRING, INT, BOOL, DOUBLE, ARRAY, UNKNOWN } type;

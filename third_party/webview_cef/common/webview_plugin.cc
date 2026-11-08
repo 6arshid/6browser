@@ -458,6 +458,122 @@ namespace webview_cef {
                 }
             };
 
+            // 6browser patch: site permissions, screen sharing and page
+            // dialogs are asked and answered by the host.
+            m_handler->onPermissionRequestEvent = [=, this](int nBrowserId, int requestId, std::string origin, uint32_t permissions)
+            {
+                if (m_invokeFunc)
+                {
+                    WValue* retMap = webview_value_new_map();
+                    WValue* bId = webview_value_new_int(nBrowserId);
+                    WValue* rId = webview_value_new_int(requestId);
+                    WValue* o = webview_value_new_string(const_cast<char*>(origin.c_str()));
+                    WValue* p = webview_value_new_int(static_cast<int64_t>(permissions));
+                    webview_value_set_string(retMap, "browserId", bId);
+                    webview_value_set_string(retMap, "requestId", rId);
+                    webview_value_set_string(retMap, "origin", o);
+                    webview_value_set_string(retMap, "permissions", p);
+                    m_invokeFunc("onPermissionRequest", retMap);
+                    webview_value_unref(bId);
+                    webview_value_unref(rId);
+                    webview_value_unref(o);
+                    webview_value_unref(p);
+                    webview_value_unref(retMap);
+                }
+            };
+
+            m_handler->onPermissionDismissedEvent = [=, this](int nBrowserId, int requestId)
+            {
+                if (m_invokeFunc)
+                {
+                    WValue* retMap = webview_value_new_map();
+                    WValue* bId = webview_value_new_int(nBrowserId);
+                    WValue* rId = webview_value_new_int(requestId);
+                    webview_value_set_string(retMap, "browserId", bId);
+                    webview_value_set_string(retMap, "requestId", rId);
+                    m_invokeFunc("onPermissionDismissed", retMap);
+                    webview_value_unref(bId);
+                    webview_value_unref(rId);
+                    webview_value_unref(retMap);
+                }
+            };
+
+            m_handler->onScreenShareEvent = [=, this](int nBrowserId, std::string origin, bool audioOffered)
+            {
+                if (m_invokeFunc)
+                {
+                    WValue* retMap = webview_value_new_map();
+                    WValue* bId = webview_value_new_int(nBrowserId);
+                    WValue* o = webview_value_new_string(const_cast<char*>(origin.c_str()));
+                    WValue* a = webview_value_new_bool(audioOffered);
+                    webview_value_set_string(retMap, "browserId", bId);
+                    webview_value_set_string(retMap, "origin", o);
+                    webview_value_set_string(retMap, "audio", a);
+                    m_invokeFunc("onScreenShareRequest", retMap);
+                    webview_value_unref(bId);
+                    webview_value_unref(o);
+                    webview_value_unref(a);
+                    webview_value_unref(retMap);
+                }
+            };
+
+            m_handler->onScreenShareCancelledEvent = [=, this](int nBrowserId)
+            {
+                if (m_invokeFunc)
+                {
+                    WValue* retMap = webview_value_new_map();
+                    WValue* bId = webview_value_new_int(nBrowserId);
+                    webview_value_set_string(retMap, "browserId", bId);
+                    m_invokeFunc("onScreenShareCancelled", retMap);
+                    webview_value_unref(bId);
+                    webview_value_unref(retMap);
+                }
+            };
+
+            m_handler->onJsDialogEvent = [=, this](int nBrowserId, int requestId, int type, std::string origin, std::string message, std::string defaultText, bool isReload)
+            {
+                if (m_invokeFunc)
+                {
+                    WValue* retMap = webview_value_new_map();
+                    WValue* bId = webview_value_new_int(nBrowserId);
+                    WValue* rId = webview_value_new_int(requestId);
+                    WValue* t = webview_value_new_int(type);
+                    WValue* o = webview_value_new_string(const_cast<char*>(origin.c_str()));
+                    WValue* m = webview_value_new_string_len(message.data(), message.size());
+                    WValue* d = webview_value_new_string_len(defaultText.data(), defaultText.size());
+                    WValue* r = webview_value_new_bool(isReload);
+                    webview_value_set_string(retMap, "browserId", bId);
+                    webview_value_set_string(retMap, "requestId", rId);
+                    webview_value_set_string(retMap, "type", t);
+                    webview_value_set_string(retMap, "origin", o);
+                    webview_value_set_string(retMap, "message", m);
+                    webview_value_set_string(retMap, "defaultText", d);
+                    webview_value_set_string(retMap, "isReload", r);
+                    m_invokeFunc("onJsDialog", retMap);
+                    webview_value_unref(bId);
+                    webview_value_unref(rId);
+                    webview_value_unref(t);
+                    webview_value_unref(o);
+                    webview_value_unref(m);
+                    webview_value_unref(d);
+                    webview_value_unref(r);
+                    webview_value_unref(retMap);
+                }
+            };
+
+            m_handler->onJsDialogsClosedEvent = [=, this](int nBrowserId)
+            {
+                if (m_invokeFunc)
+                {
+                    WValue* retMap = webview_value_new_map();
+                    WValue* bId = webview_value_new_int(nBrowserId);
+                    webview_value_set_string(retMap, "browserId", bId);
+                    m_invokeFunc("onJsDialogsClosed", retMap);
+                    webview_value_unref(bId);
+                    webview_value_unref(retMap);
+                }
+            };
+
 			{
 				std::lock_guard<std::mutex> lock(devToolsMutex);
 				devToolsSink = [=, this](const std::string& message) {
@@ -493,6 +609,12 @@ namespace webview_cef {
 		m_handler->onNewWindowEvent = nullptr;
 		m_handler->onExternalLinkEvent = nullptr;
 		m_handler->onUnhandledKeyEvent = nullptr;
+		m_handler->onPermissionRequestEvent = nullptr;
+		m_handler->onPermissionDismissedEvent = nullptr;
+		m_handler->onScreenShareEvent = nullptr;
+		m_handler->onScreenShareCancelledEvent = nullptr;
+		m_handler->onJsDialogEvent = nullptr;
+		m_handler->onJsDialogsClosedEvent = nullptr;
 		{
 			std::lock_guard<std::mutex> lock(devToolsMutex);
 			devToolsSink = nullptr;
@@ -649,6 +771,42 @@ namespace webview_cef {
 			const auto url = webview_value_get_string(webview_value_get_list_value(values, 1));
 			if (url != nullptr) m_handler->startDownload(browserId, url);
 			result(1, nullptr);
+		}
+		else if (name.compare("respondPermission") == 0) {
+			// 6browser patch: [requestId, result: 0 dismissed, 1 allowed, 2 blocked].
+			int requestId = int(webview_value_get_int(webview_value_get_list_value(values, 0)));
+			int answer = int(webview_value_get_int(webview_value_get_list_value(values, 1)));
+			m_handler->respondPermission(requestId, answer);
+			result(1, nullptr);
+		}
+		else if (name.compare("respondScreenShare") == 0) {
+			// [browserId, source id (empty cancels), share system audio].
+			int browserId = int(webview_value_get_int(webview_value_get_list_value(values, 0)));
+			const auto source = webview_value_get_string(webview_value_get_list_value(values, 1));
+			bool audio = webview_value_get_bool(webview_value_get_list_value(values, 2));
+			m_handler->respondScreenShare(browserId, source != nullptr ? source : "", audio);
+			result(1, nullptr);
+		}
+		else if (name.compare("respondJsDialog") == 0) {
+			// [requestId, ok, text].
+			int requestId = int(webview_value_get_int(webview_value_get_list_value(values, 0)));
+			bool ok = webview_value_get_bool(webview_value_get_list_value(values, 1));
+			const auto text = webview_value_get_string(webview_value_get_list_value(values, 2));
+			m_handler->respondJsDialog(requestId, ok, text != nullptr ? text : "");
+			result(1, nullptr);
+		}
+		else if (name.compare("setSitePermission") == 0) {
+			// [origin, permission kinds, cef_content_setting_values_t].
+			const auto origin = webview_value_get_string(webview_value_get_list_value(values, 0));
+			int64_t kinds = webview_value_get_int(webview_value_get_list_value(values, 1));
+			int value = int(webview_value_get_int(webview_value_get_list_value(values, 2)));
+			if (origin != nullptr) m_handler->setSitePermission(origin, static_cast<uint32_t>(kinds), value);
+			result(1, nullptr);
+		}
+		else if (name.compare("systemAudioSupported") == 0) {
+			WValue* supported = webview_value_new_bool(WebviewHandler::systemAudioSupported());
+			result(1, supported);
+			webview_value_unref(supported);
 		}
 		else if (name.compare("stopLoad") == 0) {
 			m_handler->stopLoad(int(webview_value_get_int(values)));

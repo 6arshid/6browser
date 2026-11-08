@@ -100,6 +100,20 @@ class NeverSavePasswords extends Table {
   Set<Column> get primaryKey => {origin};
 }
 
+/// Camera, microphone, location... that the user allowed or blocked for a
+/// site ([origin]: scheme, host and port). [permission] is a SitePermission
+/// name. Sites with no row are asked.
+@DataClassName('SitePermissionRow')
+class SitePermissions extends Table {
+  TextColumn get origin => text()();
+  TextColumn get permission => text()();
+  BoolColumn get allowed => boolean()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {origin, permission};
+}
+
 /// A frequently visited page (aggregated from history).
 class TopSite {
   const TopSite({required this.url, required this.title, required this.visits});
@@ -118,6 +132,7 @@ class TopSite {
     HiddenSites,
     Logins,
     NeverSavePasswords,
+    SitePermissions,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -138,7 +153,7 @@ class AppDatabase extends _$AppDatabase {
   factory AppDatabase.inMemory() => AppDatabase(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -165,6 +180,9 @@ class AppDatabase extends _$AppDatabase {
       if (from < 4) {
         await m.createTable(logins);
         await m.createTable(neverSavePasswords);
+      }
+      if (from < 5) {
+        await m.createTable(sitePermissions);
       }
     },
   );
@@ -617,6 +635,45 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> allowSavingPasswordsFor(String origin) =>
       (delete(neverSavePasswords)..where((n) => n.origin.equals(origin))).go();
+
+  // ---- site permissions ----
+
+  /// Every saved decision, grouped by site.
+  Stream<List<SitePermissionRow>> watchSitePermissions() =>
+      (select(sitePermissions)..orderBy([
+            (r) => OrderingTerm.asc(r.origin),
+            (r) => OrderingTerm.asc(r.permission),
+          ]))
+          .watch();
+
+  Future<List<SitePermissionRow>> sitePermissionsFor(String origin) =>
+      (select(sitePermissions)..where((r) => r.origin.equals(origin))).get();
+
+  Future<void> setSitePermissions(
+    String origin,
+    Iterable<String> permissions,
+    bool allowed,
+  ) => batch((b) {
+    final now = DateTime.now();
+    b.insertAllOnConflictUpdate(sitePermissions, [
+      for (final permission in permissions)
+        SitePermissionsCompanion.insert(
+          origin: origin,
+          permission: permission,
+          allowed: allowed,
+          updatedAt: now,
+        ),
+    ]);
+  });
+
+  Future<void> forgetSitePermission(String origin, String permission) =>
+      (delete(sitePermissions)..where(
+            (r) => r.origin.equals(origin) & r.permission.equals(permission),
+          ))
+          .go();
+
+  Future<void> forgetSitePermissions(String origin) =>
+      (delete(sitePermissions)..where((r) => r.origin.equals(origin))).go();
 
   // ---- settings ----
 

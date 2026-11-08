@@ -87,6 +87,18 @@ class FakeView implements BrowserView {
   final unhandledKeyController = StreamController<PageKey>.broadcast();
   @override
   Stream<PageKey> get unhandledKeys => unhandledKeyController.stream;
+  final permissionController = StreamController<PermissionRequest>.broadcast();
+  @override
+  Stream<PermissionRequest> get permissionRequests =>
+      permissionController.stream;
+  final screenShareController =
+      StreamController<ScreenShareRequest>.broadcast();
+  @override
+  Stream<ScreenShareRequest> get screenShareRequests =>
+      screenShareController.stream;
+  final pageDialogController = StreamController<PageDialogRequest>.broadcast();
+  @override
+  Stream<PageDialogRequest> get pageDialogs => pageDialogController.stream;
   bool visible = true;
   @override
   void setVisible(bool visible) => this.visible = visible;
@@ -138,6 +150,21 @@ class FakeEngine implements BrowserEngine {
   /// Null: the engine cannot run extensions.
   @override
   ExtensionHost? extensions;
+
+  /// Site permission changes made in the settings, in order.
+  final sitePermissionChanges =
+      <({String origin, Set<SitePermission> permissions, bool? allowed})>[];
+
+  @override
+  Future<void> setSitePermission(
+    String origin,
+    Set<SitePermission> permissions,
+    bool? allowed,
+  ) async => sitePermissionChanges.add((
+    origin: origin,
+    permissions: permissions,
+    allowed: allowed,
+  ));
 }
 
 /// Records what was loaded; ids are the folder names.

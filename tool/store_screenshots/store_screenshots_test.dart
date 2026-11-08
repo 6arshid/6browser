@@ -105,6 +105,12 @@ class ShotView implements BrowserView {
   @override
   Stream<PageKey> get unhandledKeys => const Stream.empty();
   @override
+  Stream<PermissionRequest> get permissionRequests => const Stream.empty();
+  @override
+  Stream<ScreenShareRequest> get screenShareRequests => const Stream.empty();
+  @override
+  Stream<PageDialogRequest> get pageDialogs => const Stream.empty();
+  @override
   void focus() {}
   @override
   void setVisible(bool visible) {}
@@ -138,6 +144,12 @@ class ShotEngine implements BrowserEngine {
   Future<void> shutdown() async {}
   @override
   ExtensionHost? get extensions => null;
+  @override
+  Future<void> setSitePermission(
+    String origin,
+    Set<SitePermission> permissions,
+    bool? allowed,
+  ) async {}
 }
 
 Future<void> loadFonts() async {

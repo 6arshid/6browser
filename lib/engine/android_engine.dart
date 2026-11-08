@@ -36,6 +36,14 @@ class AndroidEngine implements BrowserEngine {
 
   @override
   ExtensionHost? get extensions => null;
+
+  // The WebView keeps no per-site permission state of its own.
+  @override
+  Future<void> setSitePermission(
+    String origin,
+    Set<SitePermission> permissions,
+    bool? allowed,
+  ) async {}
 }
 
 class AndroidBrowserView implements BrowserView {
@@ -155,8 +163,10 @@ class AndroidBrowserView implements BrowserView {
   bool _disposed = false;
 
   // Android WebView denies getUserMedia unless the app grants the request.
-  // The prompt and the runtime permissions live in MainActivity. The request
-  // does not carry its origin, so the current page's origin is shown.
+  // The app asks (or answers from the saved choice) through
+  // [permissionRequests]; MainActivity then makes sure the app holds the
+  // Android runtime permissions. The request does not carry its origin, so
+  // the current page's origin is used.
   Future<void> _onPermissionRequest(WebViewPermissionRequest request) async {
     final camera = request.types.contains(WebViewPermissionResourceType.camera);
     final microphone = request.types.contains(
@@ -170,6 +180,26 @@ class AndroidBrowserView implements BrowserView {
     if (!onlyMedia || !(camera || microphone)) return request.deny();
     final uri = Uri.tryParse(_url.value);
     final origin = uri != null && uri.hasAuthority ? uri.origin : _url.value;
+    if (_permissionRequests.isClosed || !_permissionRequests.hasListener) {
+      return request.deny();
+    }
+    final answer = Completer<PermissionAnswer>();
+    final asked = PermissionRequest(
+      origin: origin,
+      permissions: {
+        if (camera) SitePermission.camera,
+        if (microphone) SitePermission.microphone,
+      },
+      onAnswer: answer.complete,
+    );
+    _openPermissions.add(asked);
+    _permissionRequests.add(asked);
+    final result = await Future.any([
+      answer.future,
+      asked.withdrawn.then((_) => PermissionAnswer.dismiss),
+    ]);
+    _openPermissions.remove(asked);
+    if (result != PermissionAnswer.allow) return request.deny();
     bool allowed = false;
     try {
       allowed =
@@ -177,6 +207,7 @@ class AndroidBrowserView implements BrowserView {
             'origin': origin,
             'camera': camera,
             'microphone': microphone,
+            'ask': false,
           }) ??
           false;
     } on PlatformException {
@@ -184,6 +215,9 @@ class AndroidBrowserView implements BrowserView {
     }
     return allowed ? request.grant() : request.deny();
   }
+
+  final _permissionRequests = StreamController<PermissionRequest>.broadcast();
+  final _openPermissions = <PermissionRequest>{};
 
   late final WebViewController _controller;
   final _url = ValueNotifier<String>('');
@@ -295,6 +329,14 @@ class AndroidBrowserView implements BrowserView {
   @override
   Stream<PageKey> get unhandledKeys => const Stream.empty();
   @override
+  Stream<PermissionRequest> get permissionRequests =>
+      _permissionRequests.stream;
+  // MainActivity runs the system screen picker (MediaProjection).
+  @override
+  Stream<ScreenShareRequest> get screenShareRequests => const Stream.empty();
+  @override
+  Stream<PageDialogRequest> get pageDialogs => const Stream.empty();
+  @override
   void focus() {}
   @override
   void setVisible(bool visible) {}
@@ -327,6 +369,10 @@ class AndroidBrowserView implements BrowserView {
     _byWebViewId.removeWhere((_, v) => identical(v, this));
     _scriptMessages.close();
     _externalLinks.close();
+    _permissionRequests.close();
+    for (final request in [..._openPermissions]) {
+      request.withdraw();
+    }
     await _stopScreenShare();
     if (incognito) {
       await _controller.clearCache();

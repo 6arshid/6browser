@@ -5,6 +5,8 @@
 #include "webview_app.h"
 
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "include/cef_browser.h"
 #include "include/cef_command_line.h"
@@ -16,8 +18,11 @@ namespace {
 
 // See WebviewApp::OnContextCreated.
 const char kVideoPictureInPictureShim[] = R"JS((() => {
+  // documentPictureInPicture is added a task after the page's context is
+  // created (secure-context API), so set up once it exists.
+  const setUp = () => {
   const pip = window.documentPictureInPicture;
-  if (!pip || window !== top || !window.HTMLVideoElement) return;
+  if (!pip || window !== top || !window.HTMLVideoElement) return false;
   const define = (target, name, value) => Object.defineProperty(target, name,
       {configurable: true, writable: true, value});
   let active = null;
@@ -109,7 +114,265 @@ const char kVideoPictureInPictureShim[] = R"JS((() => {
     configurable: true,
     get() { return this === document && active ? active.video : null; },
   });
+  return true;
+  };
+  if (!setUp() && window === top) setTimeout(setUp, 0);
 })();)JS";
+
+// 6browser patch: getDisplayMedia. Alloy has no source picker (it shares
+// the whole desktop) and its system audio echoes the call back to the other
+// people. The page's getDisplayMedia is replaced: the host's picker runs
+// first (native.pick), then exactly the chosen screen or window is captured
+// through the legacy desktop constraints, and system audio without this
+// browser's own sound is fed in from the browser process (native.audio).
+// Evaluates to a function that receives |native|; the page never sees it.
+// Runs before the page's own scripts, so the originals are kept here.
+const char kScreenShareShim[] = R"JS((function (native) {
+  'use strict';
+  const apply = Reflect.apply;
+  const define = Object.defineProperty;
+  const getPrototypeOf = Object.getPrototypeOf;
+  const getVideoTracks = MediaStream.prototype.getVideoTracks;
+  const getAudioTracks = MediaStream.prototype.getAudioTracks;
+  const addTrack = MediaStream.prototype.addTrack;
+  const trackStop = MediaStreamTrack.prototype.stop;
+  const getSettings = MediaStreamTrack.prototype.getSettings;
+  const listen = EventTarget.prototype.addEventListener;
+  const AudioContextClass = window.AudioContext;
+  const PromiseClass = Promise;
+  const DOMExceptionClass = DOMException;
+  const TypeErrorClass = TypeError;
+  const Int16 = Int16Array;
+  const controllers = new WeakSet();
+  const isOurs = WeakSet.prototype.has;
+  const markOurs = WeakSet.prototype.add;
+  let picking = false;
+
+  const notAllowed = (message) => new DOMExceptionClass(message || 'Permission denied', 'NotAllowedError');
+  const numberOf = (c) => {
+    if (typeof c === 'number') return c;
+    if (!c || typeof c !== 'object') return undefined;
+    for (const key of ['max', 'exact', 'ideal']) {
+      if (typeof c[key] === 'number') return c[key];
+    }
+    return undefined;
+  };
+
+  // System audio arrives as 48 kHz stereo 16-bit chunks and is played into a
+  // MediaStream track, a little ahead of time so a busy page does not cut it.
+  const attachAudio = (stream, video) => {
+    let context;
+    try {
+      context = new AudioContextClass({sampleRate: 48000, latencyHint: 'playback'});
+    } catch (e) {
+      return;
+    }
+    const destination = context.createMediaStreamDestination();
+    destination.channelCount = 2;
+    const track = apply(getAudioTracks, destination.stream, [])[0];
+    if (!track) {
+      context.close();
+      return;
+    }
+    const lead = 0.15;
+    let next = 0;
+    let stopped = false;
+    native.audio(true, (buffer) => {
+      if (stopped) return;
+      const pcm = new Int16(buffer);
+      const frames = pcm.length >> 1;
+      if (!frames) return;
+      const chunk = context.createBuffer(2, frames, 48000);
+      const left = chunk.getChannelData(0);
+      const right = chunk.getChannelData(1);
+      for (let i = 0, j = 0; i < frames; i++, j += 2) {
+        left[i] = pcm[j] / 32768;
+        right[i] = pcm[j + 1] / 32768;
+      }
+      const source = context.createBufferSource();
+      source.buffer = chunk;
+      source.connect(destination);
+      const now = context.currentTime;
+      if (next < now + 0.02 || next > now + 1) next = now + lead;
+      source.start(next);
+      next += chunk.duration;
+    });
+    const end = () => {
+      if (stopped) return;
+      stopped = true;
+      native.audio(false);
+      context.close().catch(() => {});
+    };
+    define(track, 'stop', {configurable: true, writable: true, value: function stop() {
+      end();
+      return apply(trackStop, this, []);
+    }});
+    // The shared window closed or the share ended.
+    apply(listen, video, ['ended', () => {
+      end();
+      apply(trackStop, track, []);
+    }]);
+    apply(addTrack, stream, [track]);
+  };
+
+  // Blink adds secure-context APIs only after this runs: navigator.mediaDevices
+  // right away, the MediaDevices and CaptureController interface objects a
+  // task later. Each part is installed as soon as it exists, long before a
+  // user action can start a share.
+  const installGetDisplayMedia = () => {
+    if (!window.isSecureContext) return true;
+    const devices = navigator.mediaDevices;
+    const proto = devices ? getPrototypeOf(devices)
+                          : window.MediaDevices && window.MediaDevices.prototype;
+    if (!proto || typeof proto.getUserMedia !== 'function') return false;
+    const getUserMedia = proto.getUserMedia;
+    define(proto, 'getDisplayMedia', {configurable: true, enumerable: true, writable: true,
+      value: function getDisplayMedia(options) {
+        const target = this;
+        return new PromiseClass((resolve, reject) => {
+          if (options === undefined) options = {};
+          if (options === null || typeof options !== 'object') {
+            return reject(new TypeErrorClass("Failed to execute 'getDisplayMedia' on 'MediaDevices': The provided value is not of type 'DisplayMediaStreamOptions'."));
+          }
+          const video = options.video === undefined ? true : options.video;
+          if (video === false) {
+            return reject(new TypeErrorClass("Failed to execute 'getDisplayMedia' on 'MediaDevices': video must be requested"));
+          }
+          const policy = document.permissionsPolicy || document.featurePolicy;
+          if (policy && typeof policy.allowsFeature === 'function' &&
+              !apply(policy.allowsFeature, policy, ['display-capture'])) {
+            return reject(notAllowed('Access to the feature "display-capture" is disallowed by permissions policy.'));
+          }
+          if (picking) {
+            return reject(new DOMExceptionClass('Another screen share request is open.', 'InvalidStateError'));
+          }
+          const Controller = window.CaptureController;
+          if (typeof Controller === 'function' && options.controller instanceof Controller) {
+            apply(markOurs, controllers, [options.controller]);
+          }
+          picking = true;
+          native.pick(options.audio !== undefined && options.audio !== false, (choice) => {
+            picking = false;
+            if (!choice || !choice.id) return reject(notAllowed());
+            const wanted = typeof video === 'object' ? video : {};
+            const mandatory = {chromeMediaSource: 'desktop', chromeMediaSourceId: choice.id};
+            const width = numberOf(wanted.width);
+            const height = numberOf(wanted.height);
+            const rate = numberOf(wanted.frameRate);
+            if (width) mandatory.maxWidth = width;
+            if (height) mandatory.maxHeight = height;
+            if (rate) mandatory.maxFrameRate = rate;
+            apply(getUserMedia, target, [{audio: false, video: {mandatory}}]).then((stream) => {
+              const track = apply(getVideoTracks, stream, [])[0];
+              if (track) {
+                const surface = choice.surface;
+                define(track, 'getSettings', {configurable: true, writable: true, value: function getSettings_() {
+                  const settings = apply(getSettings, this, []);
+                  if (surface && !settings.displaySurface) settings.displaySurface = surface;
+                  return settings;
+                }});
+                if (choice.audio) attachAudio(stream, track);
+              }
+              resolve(stream);
+            }, reject);
+          });
+        });
+      },
+    });
+    return true;
+  };
+
+  // A CaptureController given to getDisplayMedia is not tied to this capture;
+  // asking it not to focus the shared window is fine (focus never moves).
+  const installCaptureController = () => {
+    if (!window.isSecureContext) return true;
+    const Controller = window.CaptureController;
+    if (typeof Controller !== 'function') return false;
+    const setFocusBehavior = Controller.prototype.setFocusBehavior;
+    if (typeof setFocusBehavior !== 'function') return true;
+    define(Controller.prototype, 'setFocusBehavior', {configurable: true, enumerable: true, writable: true,
+      value: function setFocusBehavior_(behavior) {
+        if (apply(isOurs, controllers, [this])) return undefined;
+        return apply(setFocusBehavior, this, [behavior]);
+      },
+    });
+    return true;
+  };
+
+  for (const install of [installGetDisplayMedia, installCaptureController]) {
+    if (install()) continue;
+    queueMicrotask(() => {
+      if (!install()) setTimeout(install, 0);
+    });
+  }
+}))JS";
+
+// Renderer-side state of the screen share shim. Renderer main thread only.
+struct PendingPick {
+    CefRefPtr<CefV8Context> context;
+    CefRefPtr<CefV8Value> callback;
+};
+std::unordered_map<int, PendingPick> g_capture_picks;
+int g_next_capture_pick = 1;
+// Frame identifier -> where its system audio chunks go.
+std::unordered_map<std::string, PendingPick> g_audio_sinks;
+
+// The |native| object handed to kScreenShareShim.
+class CaptureBridge : public CefV8Handler {
+public:
+    bool Execute(const CefString& name, CefRefPtr<CefV8Value> object,
+                 const CefV8ValueList& arguments, CefRefPtr<CefV8Value>& retval,
+                 CefString& exception) override {
+        CefRefPtr<CefV8Context> context = CefV8Context::GetCurrentContext();
+        CefRefPtr<CefFrame> frame = context ? context->GetFrame() : nullptr;
+        if (!frame) return true;
+        if (name == "pick") {
+            if (arguments.size() < 2 || !arguments[1]->IsFunction()) return true;
+            const int id = g_next_capture_pick++;
+            g_capture_picks[id] = {context, arguments[1]};
+            CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(kCapturePickMessage);
+            message->GetArgumentList()->SetInt(0, id);
+            message->GetArgumentList()->SetBool(1, arguments[0]->IsBool() && arguments[0]->GetBoolValue());
+            frame->SendProcessMessage(PID_BROWSER, message);
+            return true;
+        }
+        if (name == "audio") {
+            const bool start = !arguments.empty() && arguments[0]->IsBool() && arguments[0]->GetBoolValue();
+            const std::string frameId = frame->GetIdentifier().ToString();
+            if (start) {
+                if (arguments.size() < 2 || !arguments[1]->IsFunction()) return true;
+                g_audio_sinks[frameId] = {context, arguments[1]};
+            } else {
+                g_audio_sinks.erase(frameId);
+            }
+            CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(kCaptureAudioMessage);
+            message->GetArgumentList()->SetBool(0, start);
+            frame->SendProcessMessage(PID_BROWSER, message);
+            return true;
+        }
+        return false;
+    }
+
+private:
+    IMPLEMENT_REFCOUNTING(CaptureBridge);
+};
+
+void InstallScreenShareShim(CefRefPtr<CefV8Context> context) {
+    if (!context->Enter()) return;
+    CefRefPtr<CefV8Value> factory;
+    CefRefPtr<CefV8Exception> exception;
+    if (context->Eval(kScreenShareShim, "", 0, factory, exception) && factory &&
+        factory->IsFunction()) {
+        CefRefPtr<CaptureBridge> bridge = new CaptureBridge();
+        CefRefPtr<CefV8Value> native = CefV8Value::CreateObject(nullptr, nullptr);
+        native->SetValue("pick", CefV8Value::CreateFunction("pick", bridge),
+                         V8_PROPERTY_ATTRIBUTE_READONLY);
+        native->SetValue("audio", CefV8Value::CreateFunction("audio", bridge),
+                         V8_PROPERTY_ATTRIBUTE_READONLY);
+        factory->ExecuteFunction(nullptr, {native});
+    }
+    context->Exit();
+}
 
 // When using the Views framework this object provides the delegate
 // implementation for the CefWindow that hosts the Views-based browser.
@@ -422,6 +685,9 @@ void WebviewApp::OnContextCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFr
         CefRefPtr<CefV8Exception> exception;
         context->Eval(kVideoPictureInPictureShim, url, 0, result, exception);
     }
+    // 6browser patch: screen sharing with a source picker; every frame, as
+    // iframes may share with allow="display-capture".
+    InstallScreenShareShim(context);
 }
 
 void WebviewApp::OnContextReleased(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefV8Context> context)
@@ -429,6 +695,19 @@ void WebviewApp::OnContextReleased(CefRefPtr<CefBrowser> browser, CefRefPtr<CefF
     if (m_render_js_bridge.get())
     {
         m_render_js_bridge->RemoveCallbackFuncWithFrame(frame);
+    }
+    // 6browser patch: the page is gone; so are its screen share requests and
+    // its system audio.
+    for (auto it = g_capture_picks.begin(); it != g_capture_picks.end();) {
+        if (it->second.context->IsSame(context)) it = g_capture_picks.erase(it);
+        else ++it;
+    }
+    auto sink = g_audio_sinks.find(frame->GetIdentifier().ToString());
+    if (sink != g_audio_sinks.end() && sink->second.context->IsSame(context)) {
+        g_audio_sinks.erase(sink);
+        CefRefPtr<CefProcessMessage> message = CefProcessMessage::Create(kCaptureAudioMessage);
+        message->GetArgumentList()->SetBool(0, false);
+        frame->SendProcessMessage(PID_BROWSER, message);
     }
 }
 
@@ -464,6 +743,43 @@ bool WebviewApp::OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefP
         {
             m_render_js_bridge->ExecuteJSCallbackFunc(callbackId, error, result);
         }
+    }
+    else if (message_name == kCapturePickedMessage)
+    {
+        // 6browser patch: the user chose a screen or window (or cancelled).
+        auto args = message->GetArgumentList();
+        auto it = g_capture_picks.find(args->GetInt(0));
+        if (it == g_capture_picks.end()) return true;
+        const PendingPick pick = it->second;
+        g_capture_picks.erase(it);
+        if (!pick.context->IsValid() || !pick.context->Enter()) return true;
+        CefRefPtr<CefV8Value> choice = CefV8Value::CreateObject(nullptr, nullptr);
+        choice->SetValue("id", CefV8Value::CreateString(args->GetString(1)), V8_PROPERTY_ATTRIBUTE_NONE);
+        choice->SetValue("audio", CefV8Value::CreateBool(args->GetBool(2)), V8_PROPERTY_ATTRIBUTE_NONE);
+        choice->SetValue("surface", CefV8Value::CreateString(args->GetString(3)), V8_PROPERTY_ATTRIBUTE_NONE);
+        pick.callback->ExecuteFunction(nullptr, {choice});
+        pick.context->Exit();
+        return true;
+    }
+    else if (message_name == kCaptureChunkMessage)
+    {
+        // 6browser patch: system audio for the frame's screen share.
+        auto sink = g_audio_sinks.find(frame->GetIdentifier().ToString());
+        if (sink == g_audio_sinks.end()) return true;
+        const PendingPick target = sink->second;
+        if (!target.context->IsValid()) {
+            g_audio_sinks.erase(sink);
+            return true;
+        }
+        CefRefPtr<CefBinaryValue> binary = message->GetArgumentList()->GetBinary(0);
+        const size_t size = binary ? binary->GetSize() : 0;
+        if (!size || !target.context->Enter()) return true;
+        std::vector<uint8_t> data(size);
+        binary->GetData(data.data(), size, 0);
+        CefRefPtr<CefV8Value> buffer = CefV8Value::CreateArrayBufferWithCopy(data.data(), size);
+        target.callback->ExecuteFunction(nullptr, {buffer});
+        target.context->Exit();
+        return true;
     }
 
     return false;

@@ -21,7 +21,8 @@ A desktop web browser with a Flutter UI on top of the Chromium engine (CEF).
 | Persistent profile (cookies, localStorage, cache) | Works on Windows |
 | Incognito tabs (`Ctrl+Shift+N`, or `6browser.exe --incognito [url]`) | Works on Windows, as tabs, not a separate window |
 | Responsive layout (tab strip becomes a tab button below 720 px) | Works |
-| Screen sharing (`getDisplayMedia`) | Windows: entire desktop after confirmation. Android: system screen/app picker, with Stop action in the notification. |
+| Screen sharing (`getDisplayMedia`) | Windows: pick a screen or a window; optional system audio (Windows 11 / Windows 10 build 20348+), without 6browser's own sound so calls do not echo. Android: system screen/app picker, with Stop action in the notification. |
+| Site permissions (camera, microphone, location...) | Asked once per site in 6browser's style and remembered; change under Settings > Site permissions. Page alerts, confirms and prompts are drawn by 6browser too (Windows). |
 | **Chrome extensions / Chrome Web Store install** | **Not supported** (Web Store pages show a notice; "Add to Chrome" is disabled to avoid an engine crash) |
 
 Shortcuts: `Ctrl+T` new tab, `Ctrl+W` close, `Ctrl+Shift+N` incognito tab,
