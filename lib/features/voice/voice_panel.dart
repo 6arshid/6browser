@@ -44,17 +44,33 @@ final usesWhisperModelsProvider = Provider<bool>(
   (ref) => !kIsWeb && Platform.isWindows,
 );
 
+/// Navigators that show a voice panel now, so a second click or the
+/// shortcut does not open another one above it.
+final _panelOpen = Expando<bool>();
+
 /// Listens for a voice command and carries it out in [view]'s tab.
+/// Browser commands go to [run], or to the [BrowserCommands] above
+/// [context].
 Future<void> runVoiceCommand(
   BuildContext context,
   WidgetRef ref,
-  BrowserView view,
-) async {
-  final commands = BrowserCommands.maybeOf(context);
-  final action = await showDialog<VoiceAction>(
-    context: context,
-    builder: (_) => const VoicePanel(),
-  );
+  BrowserView view, {
+  void Function(BrowserCommand command)? run,
+}) async {
+  if (ref.read(speechInputProvider) == null) return;
+  run ??= BrowserCommands.maybeOf(context)?.run;
+  final navigator = Navigator.of(context, rootNavigator: true);
+  if (_panelOpen[navigator] == true) return;
+  _panelOpen[navigator] = true;
+  final VoiceAction? action;
+  try {
+    action = await showDialog<VoiceAction>(
+      context: context,
+      builder: (_) => const VoicePanel(),
+    );
+  } finally {
+    _panelOpen[navigator] = null;
+  }
   switch (action) {
     case null:
       return;
@@ -65,7 +81,46 @@ Future<void> runVoiceCommand(
     case VoiceNavigate(:final url):
       await view.load(url);
     case VoiceRunCommand(:final command):
-      commands?.run(command);
+      run?.call(command);
+  }
+}
+
+/// The microphone button: in the address bar on every page. Clicking it
+/// listens for a command and carries it out. Nothing where voice commands
+/// are not available.
+class VoiceMicButton extends ConsumerWidget {
+  const VoiceMicButton({
+    super.key,
+    required this.view,
+    required this.color,
+    this.tooltip = 'Voice command',
+    this.size = 14,
+    this.width = 28,
+    this.height = 26,
+  });
+
+  final BrowserView view;
+  final Color color;
+  final String tooltip;
+  final double size;
+  final double width;
+  final double height;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (ref.watch(speechInputProvider) == null) return const SizedBox.shrink();
+    return IconButton(
+      tooltip: tooltip,
+      iconSize: size,
+      color: color,
+      padding: EdgeInsets.zero,
+      constraints: BoxConstraints.tightFor(width: width, height: height),
+      style: IconButton.styleFrom(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      ),
+      icon: const Icon(CupertinoIcons.mic),
+      onPressed: () => runVoiceCommand(context, ref, view),
+    );
   }
 }
 
@@ -262,7 +317,7 @@ class _VoicePanelState extends ConsumerState<VoicePanel> {
             '“$_heard”',
             key: const ValueKey('voice-heard'),
             textAlign: TextAlign.center,
-            textDirection: _directionOf(_heard),
+            textDirection: voiceTextDirection(_heard),
             style: theme.textTheme.titleLarge?.copyWith(fontSize: 19),
           ),
         ],
@@ -270,7 +325,7 @@ class _VoicePanelState extends ConsumerState<VoicePanel> {
         Text(
           retry ? 'Tap the microphone to try again.' : _examples(language),
           textAlign: TextAlign.center,
-          textDirection: _directionOf(_examples(language)),
+          textDirection: voiceTextDirection(_examples(language)),
           style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.6),
         ),
         const SizedBox(height: 18),
@@ -329,8 +384,8 @@ class _VoicePanelState extends ConsumerState<VoicePanel> {
   }
 }
 
-// Hebrew, Arabic, Persian, Urdu.
-TextDirection _directionOf(String text) =>
+/// Right to left for Hebrew, Arabic, Persian and Urdu text.
+TextDirection voiceTextDirection(String text) =>
     RegExp('[֐-ࣿ]').hasMatch(text) ? TextDirection.rtl : TextDirection.ltr;
 
 /// What to say, in the language chosen. Commands are understood in these

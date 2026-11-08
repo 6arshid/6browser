@@ -11,6 +11,7 @@ import 'features/settings/app_settings.dart';
 import 'features/settings/factory_reset.dart';
 import 'features/tabs/tabs_controller.dart';
 import 'features/themes/theme_service.dart';
+import 'features/voice/voice_tour.dart';
 import 'ui/browser_shell.dart';
 import 'ui/browser_theme.dart';
 import 'ui/window_caption.dart';
@@ -63,6 +64,7 @@ Future<void> main(List<String> args) async {
     ProviderScope(
       overrides: [
         launchOptionsProvider.overrideWithValue(launch),
+        voiceTourEnabledProvider.overrideWithValue(true),
         if (active != null) ...[
           activeProfileProvider.overrideWithValue(active),
           dataDirProvider.overrideWithValue(active.dataDir),

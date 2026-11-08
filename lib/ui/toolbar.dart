@@ -21,6 +21,7 @@ import '../features/settings/settings_page.dart';
 import '../features/tabs/tabs_controller.dart';
 import '../features/tabs/url_input.dart';
 import '../features/themes/theme_service.dart';
+import '../features/voice/voice_panel.dart';
 import 'browser_commands.dart';
 import 'browser_theme.dart';
 import 'favicon.dart';
@@ -49,9 +50,18 @@ void toggleBookmarksBar(WidgetRef ref) => ref
 
 /// Navigation buttons, address bar and the main menu for the active tab.
 class BrowserToolbar extends ConsumerStatefulWidget {
-  const BrowserToolbar({super.key, required this.addressFocus, this.menuKey});
+  const BrowserToolbar({
+    super.key,
+    required this.addressFocus,
+    this.menuKey,
+    this.micKey,
+  });
 
   final FocusNode addressFocus;
+
+  /// On the voice command microphone in the address bar, so the voice tour
+  /// can point at it.
+  final GlobalKey? micKey;
 
   /// Lets the shell open the main menu from the keyboard (Alt+F / F10).
   final GlobalKey<PopupMenuButtonState<String>>? menuKey;
@@ -202,6 +212,7 @@ class _BrowserToolbarState extends ConsumerState<BrowserToolbar> {
       suggestions: _suggestions,
       onGo: go,
       onTap: _onTap,
+      micKey: widget.micKey,
     );
 
     return Container(
@@ -378,6 +389,7 @@ class _Omnibox extends ConsumerWidget {
     required this.suggestions,
     required this.onGo,
     required this.onTap,
+    this.micKey,
   });
 
   final TextEditingController controller;
@@ -387,10 +399,12 @@ class _Omnibox extends ConsumerWidget {
   final _SuggestionState suggestions;
   final ValueChanged<String> onGo;
   final VoidCallback onTap;
+  final GlobalKey? micKey;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final db = ref.read(databaseProvider);
+    final voice = ref.watch(speechInputProvider) != null;
     final colors = BrowserColors.of(context);
     final scheme = Theme.of(context).colorScheme;
     final focused = focus.hasFocus;
@@ -492,8 +506,26 @@ class _Omnibox extends ConsumerWidget {
                                   ? colors.omniboxText.withValues(alpha: 0.55)
                                   : Colors.transparent,
                             ),
-                            suffixIcon: view == null || compact
+                            suffixIcon: view == null
                                 ? null
+                                : compact
+                                // Phones: only the microphone, at thumb
+                                // size.
+                                ? voice
+                                      ? Padding(
+                                          padding: const EdgeInsets.only(
+                                            right: 2,
+                                          ),
+                                          child: VoiceMicButton(
+                                            key: micKey,
+                                            view: view,
+                                            color: colors.omniboxText,
+                                            size: 19,
+                                            width: 38,
+                                            height: 38,
+                                          ),
+                                        )
+                                      : null
                                 : Padding(
                                     padding: const EdgeInsets.only(right: 3),
                                     child: Row(
@@ -504,6 +536,14 @@ class _Omnibox extends ConsumerWidget {
                                           color: colors.omniboxText,
                                         ),
                                         _ZoomChip(view: view),
+                                        VoiceMicButton(
+                                          key: micKey,
+                                          view: view,
+                                          color: colors.omniboxText,
+                                          tooltip:
+                                              'Voice command '
+                                              '(${shortcutFor(BrowserCommand.voiceCommand)})',
+                                        ),
                                         _BookmarkStar(view: view),
                                         _ReloadButton(
                                           view: view,
@@ -518,8 +558,10 @@ class _Omnibox extends ConsumerWidget {
                         ),
                         if (!focused)
                           Positioned.fill(
-                            right: compact ? 0 : 110,
-                            left: compact ? 0 : 110,
+                            // Clear of the buttons at the end, and as much
+                            // at the start so the name stays centered.
+                            right: compact ? (voice ? 40 : 0) : 124,
+                            left: compact ? (voice ? 40 : 0) : 124,
                             child: IgnorePointer(
                               child: view == null
                                   ? const SizedBox.shrink()
@@ -810,6 +852,7 @@ class _MainMenu extends ConsumerWidget {
     final muted = Theme.of(context).colorScheme.onSurfaceVariant;
     final commands = BrowserCommands.maybeOf(context);
     final pageTools = view?.supportsPageTools ?? false;
+    final voice = ref.watch(speechInputProvider) != null && view != null;
 
     PopupMenuItem<String> item(
       String value,
@@ -892,6 +935,13 @@ class _MainMenu extends ConsumerWidget {
           'Reopen closed tab',
           shortcut: shortcutFor(BrowserCommand.reopenClosedTab),
         ),
+        if (voice)
+          item(
+            BrowserCommand.voiceCommand.name,
+            CupertinoIcons.mic,
+            'Voice command…',
+            shortcut: shortcutFor(BrowserCommand.voiceCommand),
+          ),
         const PopupMenuDivider(),
         item('history', CupertinoIcons.clock, 'History', shortcut: 'Ctrl+H'),
         item(

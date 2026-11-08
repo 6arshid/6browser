@@ -61,6 +61,7 @@ enum BrowserCommand {
   downloads('Open downloads'),
   clearBrowsingData('Clear browsing data'),
   menu('Open the main menu'),
+  voiceCommand('Give a voice command'),
   devTools('Developer tools');
 
   const BrowserCommand(this.label);
@@ -127,6 +128,7 @@ const browserCommandGroups = <(String, List<BrowserCommand>)>[
       BrowserCommand.downloads,
       BrowserCommand.clearBrowsingData,
       BrowserCommand.menu,
+      BrowserCommand.voiceCommand,
       BrowserCommand.devTools,
     ],
   ),
@@ -310,6 +312,9 @@ final Map<BrowserCommand, List<SingleActivator>> browserShortcuts = {
     _alt(LogicalKeyboardKey.keyE),
     _key(LogicalKeyboardKey.f10),
   ],
+  BrowserCommand.voiceCommand: [
+    _primary(LogicalKeyboardKey.space, shift: true),
+  ],
   BrowserCommand.devTools: [
     _key(LogicalKeyboardKey.f12),
     _primary(LogicalKeyboardKey.keyI, shift: true),
@@ -410,6 +415,7 @@ const _virtualKeys = <int, LogicalKeyboardKey>{
   0x08: LogicalKeyboardKey.backspace,
   0x09: LogicalKeyboardKey.tab,
   0x1B: LogicalKeyboardKey.escape,
+  0x20: LogicalKeyboardKey.space,
   0x21: LogicalKeyboardKey.pageUp,
   0x22: LogicalKeyboardKey.pageDown,
   0x24: LogicalKeyboardKey.home,
@@ -479,6 +485,7 @@ String _keyName(LogicalKeyboardKey key) => switch (key) {
   LogicalKeyboardKey.pageUp => 'PgUp',
   LogicalKeyboardKey.pageDown => 'PgDn',
   LogicalKeyboardKey.escape => 'Esc',
+  LogicalKeyboardKey.space => 'Space',
   LogicalKeyboardKey.delete => 'Delete',
   LogicalKeyboardKey.bracketLeft => '[',
   LogicalKeyboardKey.bracketRight => ']',

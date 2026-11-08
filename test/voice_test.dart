@@ -4,12 +4,17 @@ import 'dart:typed_data';
 import 'package:browser6/data/database.dart';
 import 'package:browser6/data/providers.dart';
 import 'package:browser6/data/system_proxy.dart';
+import 'package:browser6/engine/browser_engine.dart';
+import 'package:browser6/features/new_tab/new_tab_page.dart';
 import 'package:browser6/features/settings/app_settings.dart';
 import 'package:browser6/features/tabs/tabs_controller.dart';
 import 'package:browser6/features/voice/speech_input.dart';
 import 'package:browser6/features/voice/voice_panel.dart';
+import 'package:browser6/features/voice/voice_tour.dart';
 import 'package:browser6/features/voice/whisper_models.dart';
 import 'package:browser6/ui/browser_shell.dart';
+import 'package:browser6/ui/toolbar.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -376,8 +381,10 @@ void main() {
       WidgetTester tester, {
       bool whisper = false,
       WhisperModelsState models = const WhisperModelsState(folder: 'x'),
+      bool tour = false,
+      Size size = const Size(1200, 800),
     }) async {
-      tester.view.physicalSize = const Size(1200, 800);
+      tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       speech = FakeSpeechInput();
@@ -388,6 +395,7 @@ void main() {
           speechInputProvider.overrideWithValue(speech),
           usesWhisperModelsProvider.overrideWithValue(whisper),
           whisperModelsProvider.overrideWith(() => FixedModels(models)),
+          voiceTourEnabledProvider.overrideWithValue(tour),
         ],
       );
       addTearDown(() async {
@@ -407,6 +415,198 @@ void main() {
 
     String activeUrl(ProviderContainer c) =>
         c.read(tabsProvider).active!.view.url.value;
+
+    /// Leaves the New Tab page (and its microphone) for a web page.
+    Future<void> openPage(WidgetTester tester, ProviderContainer c) async {
+      (c.read(tabsProvider).active!.view as FakeView).url.value =
+          'https://example.com/';
+      await tester.pumpAndSettle();
+      expect(find.byType(NewTabPage), findsNothing);
+    }
+
+    const toolbarMic = 'Voice command (Ctrl+Shift+Space)';
+
+    /// The tour animates for ever, so time is pumped by hand.
+    Future<void> frames(WidgetTester tester, [int ms = 600]) async {
+      for (var i = 0; i < 4; i++) {
+        await tester.pump(Duration(milliseconds: ms ~/ 4));
+      }
+    }
+
+    Future<String?> seen(ProviderContainer c) =>
+        c.read(databaseProvider).getSetting(voiceTourSeenSetting);
+
+    testWidgets('the address bar mic works on every page', (tester) async {
+      final c = await pump(tester);
+      await openPage(tester, c);
+      await tester.tap(find.byTooltip(toolbarMic));
+      await tester.pumpAndSettle();
+      expect(find.text('Listening…'), findsOneWidget);
+
+      speech.say('open YouTube');
+      await tester.pumpAndSettle();
+      expect(activeUrl(c), 'https://www.youtube.com/');
+    });
+
+    testWidgets('Ctrl+Shift+Space listens, and only one panel opens', (
+      tester,
+    ) async {
+      final c = await pump(tester);
+      // On the New Tab page the address bar has the keyboard.
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pumpAndSettle();
+      expect(find.text('Listening…'), findsOneWidget);
+      await tester.tap(find.byTooltip('Close'));
+      await tester.pumpAndSettle();
+      expect(find.byType(VoicePanel), findsNothing);
+
+      // On a web page the page sees the key first and passes it on.
+      await openPage(tester, c);
+      final view = c.read(tabsProvider).active!.view as FakeView;
+      for (var i = 0; i < 2; i++) {
+        view.unhandledKeyController.add(
+          const PageKey(0x20, control: true, shift: true),
+        );
+        await tester.pumpAndSettle();
+      }
+      expect(find.byType(VoicePanel), findsOneWidget);
+      expect(speech.languages, hasLength(2));
+
+      speech.say('new tab');
+      await tester.pumpAndSettle();
+      expect(c.read(tabsProvider).tabs, hasLength(2));
+    });
+
+    testWidgets('the mic does not open a second panel', (tester) async {
+      final c = await pump(tester);
+      await openPage(tester, c);
+      final mic = tester.widget<IconButton>(
+        find.ancestor(
+          of: find.byIcon(CupertinoIcons.mic),
+          matching: find.byType(IconButton),
+        ),
+      );
+      mic.onPressed!();
+      mic.onPressed!();
+      await tester.pumpAndSettle();
+      expect(find.byType(VoicePanel), findsOneWidget);
+      expect(speech.languages, hasLength(1));
+    });
+
+    testWidgets('the main menu has a voice command', (tester) async {
+      final c = await pump(tester);
+      await openPage(tester, c);
+      await tester.tap(find.byTooltip('Menu'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Voice command…'));
+      await tester.pumpAndSettle();
+      expect(find.text('Listening…'), findsOneWidget);
+    });
+
+    testWidgets('phones have the mic in the address bar', (tester) async {
+      final c = await pump(tester, size: const Size(400, 800));
+      await openPage(tester, c);
+      final mic = find.descendant(
+        of: find.byType(BrowserToolbar),
+        matching: find.byType(VoiceMicButton),
+      );
+      expect(mic, findsOneWidget);
+      await tester.tap(mic);
+      await tester.pumpAndSettle();
+      expect(find.text('Listening…'), findsOneWidget);
+    });
+
+    testWidgets('the first launch tours voice control, then tries it', (
+      tester,
+    ) async {
+      final c = await pump(tester, tour: true);
+      await frames(tester, 1400);
+      await frames(tester);
+      expect(find.text('Talk to 6browser'), findsOneWidget);
+      expect(find.text('1 of 3'), findsOneWidget);
+      // The spotlight found the microphone in the address bar.
+      final hole = tester.getCenter(
+        find.byKey(const ValueKey('voice-tour-mic')),
+      );
+      expect(hole, tester.getCenter(find.byTooltip(toolbarMic)));
+
+      await tester.tap(find.text('Next'));
+      await frames(tester);
+      expect(find.text('Just say it'), findsOneWidget);
+      // The demo speaks a command and shows what it does.
+      await frames(tester, 2400);
+      expect(find.textContaining('search Iran'), findsOneWidget);
+      expect(find.text('Searches the web'), findsOneWidget);
+
+      await tester.tap(find.text('Next'));
+      await frames(tester);
+      expect(find.text('Made for you'), findsOneWidget);
+      expect(find.textContaining('Ctrl+Shift+Space'), findsOneWidget);
+      expect(find.text('Skip'), findsNothing);
+
+      await tester.tap(find.text('Try it now'));
+      await frames(tester);
+      await tester.pumpAndSettle();
+      expect(find.text('Talk to 6browser'), findsNothing);
+      expect(find.text('Listening…'), findsOneWidget);
+      expect(await seen(c), 'true');
+    });
+
+    testWidgets('the tour can be skipped and does not come back', (
+      tester,
+    ) async {
+      final c = await pump(tester, tour: true);
+      await frames(tester, 1400);
+      await frames(tester);
+      await tester.tap(find.text('Skip'));
+      await frames(tester);
+      await tester.pumpAndSettle();
+      expect(find.text('Talk to 6browser'), findsNothing);
+      expect(find.byType(VoicePanel), findsNothing);
+      expect(await seen(c), 'true');
+    });
+
+    testWidgets('the tour shows in Persian and starts from the spotlight', (
+      tester,
+    ) async {
+      final c = await pump(tester, tour: true);
+      await c.read(databaseProvider).setSetting('voiceLanguage', 'fa');
+      await frames(tester, 1400);
+      await frames(tester);
+      await tester.tap(find.text('Next'));
+      await frames(tester, 2400);
+      expect(find.textContaining('جستجو کن ایران'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('voice-tour-mic')));
+      await frames(tester);
+      await tester.pumpAndSettle();
+      expect(find.text('Listening…'), findsOneWidget);
+      expect(speech.languages, [VoiceLanguage.persian]);
+    });
+
+    testWidgets('a tour already seen stays away until asked for', (
+      tester,
+    ) async {
+      final c = await pump(tester, tour: true);
+      await c.read(databaseProvider).setSetting(voiceTourSeenSetting, 'true');
+      await frames(tester, 1400);
+      await frames(tester);
+      expect(find.text('Talk to 6browser'), findsNothing);
+
+      // Settings > Voice commands > Show the voice tour.
+      c.read(voiceTourRequestProvider.notifier).show();
+      await frames(tester);
+      await frames(tester);
+      expect(find.text('Talk to 6browser'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await frames(tester);
+      await tester.pumpAndSettle();
+      expect(find.text('Talk to 6browser'), findsNothing);
+    });
 
     testWidgets('the New Tab mic searches what was said', (tester) async {
       final c = await pump(tester);

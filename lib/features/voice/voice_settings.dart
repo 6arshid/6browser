@@ -1,10 +1,14 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/providers.dart';
+import '../../ui/browser_commands.dart';
+import '../../ui/toolbar.dart' show compactBreakpoint;
 import '../settings/app_settings.dart';
 import 'speech_input.dart';
 import 'voice_panel.dart';
+import 'voice_tour.dart';
 import 'whisper_models.dart';
 
 /// Settings > Voice commands: the language spoken and, on Windows, the
@@ -19,17 +23,30 @@ class VoiceSettings extends ConsumerWidget {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
     final whisper = ref.watch(usesWhisperModelsProvider);
+    final keyboard = MediaQuery.sizeOf(context).width >= compactBreakpoint;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Tap the microphone on the New Tab page and say what to do: '
-          '"search Iran", "open YouTube", "new tab", "go back". Commands are '
-          'understood in English, Persian and Danish; in other languages, '
-          'what you say is searched for.',
+          'Click the microphone in the address bar'
+          '${keyboard ? ' (or press ${shortcutFor(BrowserCommand.voiceCommand)})' : ''}'
+          ' and say what to do: "search Iran", "open YouTube", "new tab", '
+          '"go back". Commands are understood in English, Persian and '
+          'Danish; in other languages, what you say is searched for.',
           style: TextStyle(color: muted),
         ),
-        const SizedBox(height: 16),
+        Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: TextButton.icon(
+            icon: const Icon(CupertinoIcons.play_circle, size: 18),
+            label: const Text('Show the voice tour'),
+            onPressed: () {
+              Navigator.of(context).popUntil((route) => route.isFirst);
+              ref.read(voiceTourRequestProvider.notifier).show();
+            },
+          ),
+        ),
+        const SizedBox(height: 12),
         DropdownButtonFormField<VoiceLanguage>(
           key: ValueKey(settings.voiceLanguage),
           initialValue: settings.voiceLanguage,

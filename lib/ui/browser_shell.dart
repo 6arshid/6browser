@@ -22,6 +22,8 @@ import '../features/settings/app_settings.dart';
 import '../features/tabs/tabs_controller.dart';
 import '../features/tabs/url_input.dart';
 import '../features/themes/theme_service.dart';
+import '../features/voice/voice_panel.dart';
+import '../features/voice/voice_tour.dart';
 import 'bookmarks_bar.dart';
 import 'browser_commands.dart';
 import 'browser_theme.dart';
@@ -45,6 +47,11 @@ class BrowserShell extends ConsumerStatefulWidget {
 class _BrowserShellState extends ConsumerState<BrowserShell> {
   final _addressFocus = FocusNode();
   final _menuKey = GlobalKey<PopupMenuButtonState<String>>();
+
+  /// The voice command microphone in the address bar, for the voice tour.
+  final _micKey = GlobalKey(debugLabel: 'voice mic');
+  Timer? _tourTimer;
+  bool _touring = false;
 
   // Find in page (Ctrl+F). The bar belongs to one tab; switching tabs
   // closes it.
@@ -104,6 +111,44 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
         list.profiles.length > 1 ? '${me.name} - 6browser' : '6browser',
       );
     }, fireImmediately: true);
+    // The first time 6browser opens, a tour shows voice commands once the
+    // window has settled.
+    ref.listenManual(tabsProvider.select((s) => s.tabs.isNotEmpty), (_, ready) {
+      if (!ready || _tourTimer != null || !ref.read(voiceTourEnabledProvider)) {
+        return;
+      }
+      _tourTimer = Timer(const Duration(milliseconds: 1200), () async {
+        final seen = await ref
+            .read(databaseProvider)
+            .getSetting(voiceTourSeenSetting);
+        if (seen == null) _showVoiceTour(firstRun: true);
+      });
+    }, fireImmediately: true);
+    // Settings > Voice commands > Show the tour.
+    ref.listenManual(voiceTourRequestProvider, (_, _) {
+      // After the settings page has gone, so the microphone is on screen.
+      _tourTimer?.cancel();
+      _tourTimer = Timer(
+        const Duration(milliseconds: 450),
+        () => _showVoiceTour(firstRun: false),
+      );
+    });
+  }
+
+  Future<void> _showVoiceTour({required bool firstRun}) async {
+    if (!mounted || _touring || ref.read(speechInputProvider) == null) return;
+    // Not over a page or dialog opened meanwhile, nor in full screen; the
+    // first-run tour then waits for the next launch.
+    if (ModalRoute.of(context)?.isCurrent != true || Fullscreen.active.value) {
+      return;
+    }
+    _touring = true;
+    final result = await showVoiceTour(context, target: _micKey);
+    _touring = false;
+    await ref.read(databaseProvider).setSetting(voiceTourSeenSetting, 'true');
+    if (mounted && result == VoiceTourResult.tryIt) {
+      _run(BrowserCommand.voiceCommand);
+    }
   }
 
   void _onHandOver(List<String> args) {
@@ -118,6 +163,7 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
 
   @override
   void dispose() {
+    _tourTimer?.cancel();
     _handOvers?.cancel();
     _addressFocus.removeListener(_onAddressFocus);
     _addressFocus.dispose();
@@ -304,6 +350,8 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
         openPage(context, const SettingsPage());
       case BrowserCommand.menu:
         _menuKey.currentState?.showButtonMenu();
+      case BrowserCommand.voiceCommand:
+        if (view != null) runVoiceCommand(context, ref, view, run: _run);
       case BrowserCommand.devTools:
         view?.openDevTools();
     }
@@ -368,6 +416,7 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
                         BrowserToolbar(
                           addressFocus: _addressFocus,
                           menuKey: _menuKey,
+                          micKey: _micKey,
                         ),
                       ),
                     if (view != null && !fullscreen)

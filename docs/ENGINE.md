@@ -328,12 +328,26 @@ engine and stays removed); badges; macOS/Linux pipe.
 
 ## Voice commands (2026-11-08)
 
-A microphone on the New Tab page's search box: "search Iran", «جستجو کن
-ایران», "open YouTube", «برو به یوتیوب», "new tab", «برگرد»... The words go
-through `parseVoiceCommand` (`lib/features/voice/voice_commands.dart`):
-browser commands (the `BrowserCommand` table), searches (also on YouTube,
-Wikipedia...), sites by name, and otherwise the same as typing in the
-address bar.
+A microphone in the address bar on every page (and in the New Tab page's
+search box), Ctrl+Shift+Space (`BrowserCommand.voiceCommand`; on a web
+page it arrives as an unhandled page key) and "Voice command…" in the main
+menu: "search Iran", «جستجو کن ایران», "open YouTube", «برو به یوتیوب»,
+"new tab", «برگرد»... The words go through `parseVoiceCommand`
+(`lib/features/voice/voice_commands.dart`): browser commands (the
+`BrowserCommand` table), searches (also on YouTube, Wikipedia...), sites by
+name, and otherwise the same as typing in the address bar. Only one voice
+panel opens at a time.
+
+**First-run tour** (`lib/features/voice/voice_tour.dart`): 1.2 s after the
+first tabs appear, if the `voiceTourSeen` setting is unset, a spotlight
+closes in on the address bar microphone and a three-step card explains it
+(the demo types example commands in the chosen voice language). Tapping the
+spotlighted microphone or "Try it now" opens the voice panel; Skip/Esc just
+closes. Either way `voiceTourSeen` is set. It is skipped for this launch if
+another page or dialog is open, or in full screen. Settings > Voice
+commands > "Show the voice tour" replays it. `voiceTourEnabledProvider` is
+off by default and turned on in `main()`, so other widget tests never see
+it.
 
 - **Windows: whisper.cpp, offline.** Windows' own recognizer
   (`Windows.Media.SpeechRecognition`) has no Persian at all (this PC offers
