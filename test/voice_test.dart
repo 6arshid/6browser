@@ -1,13 +1,16 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:browser6/data/database.dart';
 import 'package:browser6/data/providers.dart';
 import 'package:browser6/data/system_proxy.dart';
 import 'package:browser6/engine/browser_engine.dart';
+import 'package:browser6/features/history/history_page.dart';
 import 'package:browser6/features/new_tab/new_tab_page.dart';
 import 'package:browser6/features/settings/app_settings.dart';
 import 'package:browser6/features/tabs/tabs_controller.dart';
+import 'package:browser6/features/voice/search_results.dart';
 import 'package:browser6/features/voice/speech_input.dart';
 import 'package:browser6/features/voice/voice_panel.dart';
 import 'package:browser6/features/voice/voice_tour.dart';
@@ -374,7 +377,7 @@ void main() {
     });
   });
 
-  group('voice panel', () {
+  group('voice dock', () {
     late FakeSpeechInput speech;
 
     Future<ProviderContainer> pump(
@@ -413,18 +416,45 @@ void main() {
       return container;
     }
 
-    String activeUrl(ProviderContainer c) =>
-        c.read(tabsProvider).active!.view.url.value;
+    FakeView active(ProviderContainer c) =>
+        c.read(tabsProvider).active!.view as FakeView;
+    String activeUrl(ProviderContainer c) => active(c).url.value;
 
     /// Leaves the New Tab page (and its microphone) for a web page.
-    Future<void> openPage(WidgetTester tester, ProviderContainer c) async {
-      (c.read(tabsProvider).active!.view as FakeView).url.value =
-          'https://example.com/';
+    Future<void> openPage(
+      WidgetTester tester,
+      ProviderContainer c, [
+      String url = 'https://example.com/',
+    ]) async {
+      active(c).url.value = url;
       await tester.pumpAndSettle();
       expect(find.byType(NewTabPage), findsNothing);
     }
 
-    const toolbarMic = 'Voice command (Ctrl+Shift+Space)';
+    const toolbarMic = 'Voice commands (Ctrl+Shift+Space)';
+    const toolbarMicOn = 'Turn off voice commands (Ctrl+Shift+Space)';
+    const closeDock = 'Turn off voice commands';
+    const googleIran = 'https://www.google.com/search?q=iran';
+
+    /// Turns voice commands on with the address bar mic.
+    Future<void> turnOn(WidgetTester tester) async {
+      await tester.tap(find.byTooltip(toolbarMic));
+      await tester.pumpAndSettle();
+      expect(find.text('Listening…'), findsOneWidget);
+    }
+
+    Future<void> say(WidgetTester tester, String text) async {
+      speech.say(text);
+      await tester.pumpAndSettle();
+    }
+
+    /// The token in the last page script, and an answer from the page.
+    void pageAnswers(FakeView view, Map<String, Object?> message) {
+      final token = RegExp(r'"([0-9a-f]{24})"')
+          .firstMatch(view.scripts.last)!
+          .group(1);
+      view.scriptController.add(jsonEncode({'t': token, ...message}));
+    }
 
     /// The tour animates for ever, so time is pumped by hand.
     Future<void> frames(WidgetTester tester, [int ms = 600]) async {
@@ -436,73 +466,269 @@ void main() {
     Future<String?> seen(ProviderContainer c) =>
         c.read(databaseProvider).getSetting(voiceTourSeenSetting);
 
-    testWidgets('the address bar mic works on every page', (tester) async {
-      final c = await pump(tester);
-      await openPage(tester, c);
-      await tester.tap(find.byTooltip(toolbarMic));
-      await tester.pumpAndSettle();
-      expect(find.text('Listening…'), findsOneWidget);
-
-      speech.say('open YouTube');
-      await tester.pumpAndSettle();
-      expect(activeUrl(c), 'https://www.youtube.com/');
-    });
-
-    testWidgets('Ctrl+Shift+Space listens, and only one panel opens', (
+    testWidgets('stays on and listens again after every command', (
       tester,
     ) async {
       final c = await pump(tester);
-      // On the New Tab page the address bar has the keyboard.
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.space);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await openPage(tester, c);
+      await turnOn(tester);
+      expect(find.byType(VoiceDock), findsOneWidget);
+      expect(find.byTooltip(toolbarMicOn), findsOneWidget);
+
+      await say(tester, 'open YouTube');
+      expect(activeUrl(c), 'https://www.youtube.com/');
+      expect(find.text('Listening…'), findsOneWidget);
+      expect(find.text('“open YouTube”'), findsOneWidget);
+      expect(speech.languages, hasLength(2));
+
+      await say(tester, 'go back');
+      expect(active(c).backs, 1);
+      await say(tester, 'new tab');
+      expect(c.read(tabsProvider).tabs, hasLength(2));
+      // Still on, on the new tab too.
+      expect(find.text('Listening…'), findsOneWidget);
+      expect(speech.languages, hasLength(4));
+    });
+
+    testWidgets('silence starts over; failing at once stops it', (
+      tester,
+    ) async {
+      final c = await pump(tester);
+      await openPage(tester, c);
+      await turnOn(tester);
+      speech.fail(SpeechError.noSpeech);
       await tester.pumpAndSettle();
       expect(find.text('Listening…'), findsOneWidget);
-      await tester.tap(find.byTooltip('Close'));
+      expect(speech.languages, hasLength(2));
+      // Three quick failures in a row: something is wrong.
+      speech.fail(SpeechError.noSpeech);
       await tester.pumpAndSettle();
-      expect(find.byType(VoicePanel), findsNothing);
+      speech.fail(SpeechError.noSpeech);
+      await tester.pumpAndSettle();
+      expect(find.text(SpeechError.noSpeech.message), findsOneWidget);
+      expect(speech.languages, hasLength(3));
+
+      await tester.tap(find.byTooltip('Listen again'));
+      await tester.pumpAndSettle();
+      expect(find.text('Listening…'), findsOneWidget);
+    });
+
+    testWidgets('Ctrl+Shift+Space turns it on and off', (tester) async {
+      final c = await pump(tester);
+      Future<void> shortcut() async {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.space);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+        await tester.pumpAndSettle();
+      }
+
+      // On the New Tab page the address bar has the keyboard.
+      await shortcut();
+      expect(find.text('Listening…'), findsOneWidget);
+      await shortcut();
+      expect(find.byType(VoiceDock), findsNothing);
+      expect(speech.cancels, greaterThan(0));
 
       // On a web page the page sees the key first and passes it on.
       await openPage(tester, c);
-      final view = c.read(tabsProvider).active!.view as FakeView;
-      for (var i = 0; i < 2; i++) {
-        view.unhandledKeyController.add(
-          const PageKey(0x20, control: true, shift: true),
-        );
-        await tester.pumpAndSettle();
-      }
-      expect(find.byType(VoicePanel), findsOneWidget);
-      expect(speech.languages, hasLength(2));
-
-      speech.say('new tab');
+      active(c).unhandledKeyController
+          .add(const PageKey(0x20, control: true, shift: true));
       await tester.pumpAndSettle();
-      expect(c.read(tabsProvider).tabs, hasLength(2));
+      expect(find.byType(VoiceDock), findsOneWidget);
+      expect(speech.languages, hasLength(2));
     });
 
-    testWidgets('the mic does not open a second panel', (tester) async {
+    testWidgets('the close button and "stop listening" turn it off', (
+      tester,
+    ) async {
       final c = await pump(tester);
       await openPage(tester, c);
-      final mic = tester.widget<IconButton>(
-        find.ancestor(
-          of: find.byIcon(CupertinoIcons.mic),
-          matching: find.byType(IconButton),
-        ),
-      );
-      mic.onPressed!();
-      mic.onPressed!();
+      await turnOn(tester);
+      await tester.tap(find.byTooltip('Done speaking'));
+      expect(speech.finishes, 1);
+      await tester.tap(find.byTooltip(closeDock));
       await tester.pumpAndSettle();
-      expect(find.byType(VoicePanel), findsOneWidget);
-      expect(speech.languages, hasLength(1));
+      expect(find.byType(VoiceDock), findsNothing);
+      expect(speech.cancels, greaterThan(0));
+      expect(find.byTooltip(toolbarMic), findsOneWidget);
+
+      await turnOn(tester);
+      await say(tester, 'دیگه گوش نده');
+      expect(find.byType(VoiceDock), findsNothing);
     });
 
-    testWidgets('the main menu has a voice command', (tester) async {
+    testWidgets('words that are not commands are not searched for', (
+      tester,
+    ) async {
+      final c = await pump(tester);
+      await openPage(tester, c);
+      await turnOn(tester);
+      await say(tester, 'and then we went to the market');
+      expect(activeUrl(c), 'https://example.com/');
+      expect(
+        find.text('That was not a command. To search, say “search …”.'),
+        findsOneWidget,
+      );
+      expect(find.text('Listening…'), findsOneWidget);
+
+      // Nothing to search for.
+      await say(tester, 'search');
+      expect(find.text('“search”'), findsOneWidget);
+      expect(activeUrl(c), 'https://example.com/');
+    });
+
+    testWidgets('opens a numbered result of a Google search', (tester) async {
+      final c = await pump(tester);
+      await openPage(tester, c, googleIran);
+      await turnOn(tester);
+      final view = active(c);
+
+      speech.say('لینک دوم گوگل رو باز کن');
+      await tester.pump();
+      expect(view.scripts.last, contains('"#search a h3", 2,'));
+      expect(view.scripts.last, contains('fakePost'));
+      pageAnswers(view, {'count': 8, 'url': 'https://example.com/iran'});
+      await tester.pumpAndSettle();
+      expect(activeUrl(c), 'https://example.com/iran');
+      expect(find.text('Listening…'), findsOneWidget);
+      // The history of the page opened is saved meanwhile.
+      await tester.pump(const Duration(milliseconds: 10));
+    });
+
+    testWidgets('a numbered result in a new tab, or missing', (tester) async {
+      final c = await pump(tester);
+      await openPage(tester, c, googleIran);
+      await turnOn(tester);
+      final view = active(c);
+
+      speech.say('open the third link in a new tab');
+      await tester.pump();
+      pageAnswers(view, {'count': 8, 'url': 'https://www.reuters.com/'});
+      await tester.pumpAndSettle();
+      expect(c.read(tabsProvider).tabs, hasLength(2));
+      expect(activeUrl(c), 'https://www.reuters.com/');
+      expect(view.url.value, googleIran);
+
+      c.read(tabsProvider.notifier).selectIndex(0);
+      await tester.pumpAndSettle();
+      speech.say('open the tenth link');
+      await tester.pump();
+      pageAnswers(view, {'count': 8, 'url': null});
+      await tester.pumpAndSettle();
+      expect(
+        find.text('There is no result 10 here: this page shows 8.'),
+        findsOneWidget,
+      );
+      expect(view.url.value, googleIran);
+
+      // The page could send anything: only web addresses are opened.
+      speech.say('open the first link');
+      await tester.pump();
+      pageAnswers(view, {'count': 8, 'url': 'javascript:alert(1)'});
+      await tester.pumpAndSettle();
+      expect(view.url.value, googleIran);
+    });
+
+    testWidgets('numbered results need a results page', (tester) async {
+      final c = await pump(tester);
+      await openPage(tester, c);
+      await turnOn(tester);
+      await say(tester, 'open the second link');
+      expect(active(c).scripts, isEmpty);
+      expect(find.textContaining('search first'), findsOneWidget);
+    });
+
+    testWidgets('pages through Google results', (tester) async {
+      final c = await pump(tester);
+      await openPage(tester, c, googleIran);
+      await turnOn(tester);
+      await say(tester, 'برو صفحه بعد گوگل');
+      expect(activeUrl(c), '$googleIran&start=10');
+      await say(tester, 'next page');
+      expect(activeUrl(c), '$googleIran&start=20');
+      await say(tester, 'previous page of results');
+      expect(activeUrl(c), '$googleIran&start=10');
+      await say(tester, 'صفحه اول گوگل');
+      expect(activeUrl(c), googleIran);
+      await say(tester, 'صفحه قبل گوگل');
+      expect(find.text('This is the first page.'), findsOneWidget);
+    });
+
+    testWidgets('"next page" goes forward away from search results', (
+      tester,
+    ) async {
+      final c = await pump(tester);
+      await openPage(tester, c);
+      await turnOn(tester);
+      await say(tester, 'صفحه بعد');
+      expect(active(c).forwards, 1);
+      expect(activeUrl(c), 'https://example.com/');
+    });
+
+    testWidgets('DuckDuckGo shows more results on the same page', (
+      tester,
+    ) async {
+      final c = await pump(tester);
+      await openPage(tester, c, 'https://duckduckgo.com/?q=iran&ia=web');
+      await turnOn(tester);
+      final view = active(c);
+      speech.say('next page');
+      await tester.pump();
+      expect(view.scripts.last, contains('#more-results'));
+      pageAnswers(view, {'more': true});
+      await tester.pumpAndSettle();
+      expect(find.byIcon(CupertinoIcons.checkmark_circle_fill), findsOneWidget);
+    });
+
+    testWidgets('pauses while a page covers the browser', (tester) async {
+      final c = await pump(tester);
+      await openPage(tester, c);
+      await turnOn(tester);
+      await say(tester, 'history');
+      expect(find.byType(HistoryPage), findsOneWidget);
+      // Not listening behind the page.
+      expect(speech.languages, hasLength(1));
+
+      Navigator.of(tester.element(find.byType(HistoryPage))).pop();
+      await tester.pumpAndSettle();
+      expect(find.text('Listening…'), findsOneWidget);
+      expect(speech.languages, hasLength(2));
+      await tester.pump(const Duration(milliseconds: 10));
+    });
+
+    testWidgets('pauses while 6browser is minimized', (tester) async {
+      final c = await pump(tester);
+      await openPage(tester, c);
+      await turnOn(tester);
+      for (final state in [
+        AppLifecycleState.inactive,
+        AppLifecycleState.hidden,
+      ]) {
+        tester.binding.handleAppLifecycleStateChanged(state);
+      }
+      await tester.pumpAndSettle();
+      // No frames are drawn while hidden; the microphone is let go.
+      expect(speech.cancels, greaterThan(0));
+
+      for (final state in [
+        AppLifecycleState.inactive,
+        AppLifecycleState.resumed,
+      ]) {
+        tester.binding.handleAppLifecycleStateChanged(state);
+      }
+      await tester.pumpAndSettle();
+      expect(find.text('Listening…'), findsOneWidget);
+      expect(speech.languages, hasLength(2));
+    });
+
+    testWidgets('the main menu turns voice commands on', (tester) async {
       final c = await pump(tester);
       await openPage(tester, c);
       await tester.tap(find.byTooltip('Menu'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Voice command…'));
+      await tester.tap(find.text('Voice commands'));
       await tester.pumpAndSettle();
       expect(find.text('Listening…'), findsOneWidget);
     });
@@ -518,6 +744,8 @@ void main() {
       await tester.tap(mic);
       await tester.pumpAndSettle();
       expect(find.text('Listening…'), findsOneWidget);
+      // The dock fits the screen.
+      expect(tester.getSize(find.byType(VoiceDock)).width, lessThan(400));
     });
 
     testWidgets('the first launch tours voice control, then tries it', (
@@ -566,7 +794,7 @@ void main() {
       await frames(tester);
       await tester.pumpAndSettle();
       expect(find.text('Talk to 6browser'), findsNothing);
-      expect(find.byType(VoicePanel), findsNothing);
+      expect(find.byType(VoiceDock), findsNothing);
       expect(await seen(c), 'true');
     });
 
@@ -610,73 +838,51 @@ void main() {
 
     testWidgets('the New Tab mic searches what was said', (tester) async {
       final c = await pump(tester);
-      await tester.tap(find.byTooltip('Voice command'));
+      await tester.tap(find.byTooltip('Voice commands'));
       await tester.pumpAndSettle();
       expect(find.text('Listening…'), findsOneWidget);
       expect(speech.languages, [VoiceLanguage.english]);
 
-      speech.say('Search Iran.');
-      await tester.pumpAndSettle();
-      expect(find.text('Listening…'), findsNothing);
-      expect(activeUrl(c), 'https://www.google.com/search?q=iran');
+      await say(tester, 'Search Iran.');
+      expect(activeUrl(c), googleIran);
+      expect(find.text('Listening…'), findsOneWidget);
     });
 
     testWidgets('Persian commands open sites and run browser commands', (
       tester,
     ) async {
       final c = await pump(tester);
-      await tester.tap(find.byTooltip('Voice command'));
+      await tester.tap(find.byTooltip('Voice commands'));
       await tester.pumpAndSettle();
-      speech.say('برو به یوتیوب');
-      await tester.pumpAndSettle();
+      await say(tester, 'برو به یوتیوب');
       expect(activeUrl(c), 'https://www.youtube.com/');
 
       c.read(tabsProvider.notifier).newTab();
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Voice command'));
-      await tester.pumpAndSettle();
-      speech.say('یه تب جدید باز کن');
-      await tester.pumpAndSettle();
+      await say(tester, 'یه تب جدید باز کن');
       expect(c.read(tabsProvider).tabs, hasLength(3));
     });
 
     testWidgets('failures explain and the mic tries again', (tester) async {
       await pump(tester);
-      await tester.tap(find.byTooltip('Voice command'));
+      await tester.tap(find.byTooltip('Voice commands'));
       await tester.pumpAndSettle();
       speech.fail(SpeechError.micBusy);
       await tester.pumpAndSettle();
       expect(find.text(SpeechError.micBusy.message), findsOneWidget);
+      expect(speech.languages, hasLength(1));
 
-      await tester.tap(find.byTooltip('Try again'));
+      await tester.tap(find.byTooltip('Listen again'));
       await tester.pumpAndSettle();
       expect(speech.languages, hasLength(2));
       expect(find.text('Listening…'), findsOneWidget);
-
-      // Something that is not a command stays on screen.
-      speech.say('search');
-      await tester.pumpAndSettle();
-      expect(find.text('Not sure what to do with that.'), findsOneWidget);
-      expect(find.text('“search”'), findsOneWidget);
-    });
-
-    testWidgets('Done stops listening; closing cancels', (tester) async {
-      await pump(tester);
-      await tester.tap(find.byTooltip('Voice command'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Done'));
-      expect(speech.finishes, 1);
-      await tester.tap(find.byTooltip('Close'));
-      await tester.pumpAndSettle();
-      expect(speech.cancels, greaterThan(0));
-      expect(find.text('Listening…'), findsNothing);
     });
 
     testWidgets('choosing a language listens in it and keeps it', (
       tester,
     ) async {
       final c = await pump(tester);
-      await tester.tap(find.byTooltip('Voice command'));
+      await tester.tap(find.byTooltip('Voice commands'));
       await tester.pumpAndSettle();
       expect(find.text('English'), findsOneWidget);
       expect(find.textContaining('“search Iran”'), findsOneWidget);
@@ -695,21 +901,21 @@ void main() {
       expect(find.textContaining('“søg efter Iran”'), findsOneWidget);
       // Saved: the settings (read from the database) have it.
       expect(c.read(appSettingsProvider).voiceLanguage, VoiceLanguage.danish);
+      expect(speech.languages, hasLength(2));
 
       // Danish words become commands.
-      speech.say('Søg efter Iran.');
-      await tester.pumpAndSettle();
-      expect(activeUrl(c), 'https://www.google.com/search?q=iran');
+      await say(tester, 'Søg efter Iran.');
+      expect(activeUrl(c), googleIran);
     });
 
-    testWidgets('the panel uses the language chosen in settings', (
+    testWidgets('the dock uses the language chosen in settings', (
       tester,
     ) async {
       final c = await pump(tester);
       c.read(databaseProvider).setSetting('voiceLanguage', 'fa');
       await tester.pumpAndSettle();
       expect(c.read(appSettingsProvider).voiceLanguage, VoiceLanguage.persian);
-      await tester.tap(find.byTooltip('Voice command'));
+      await tester.tap(find.byTooltip('Voice commands'));
       await tester.pumpAndSettle();
       expect(speech.languages, [VoiceLanguage.persian]);
       expect(find.text('فارسی'), findsOneWidget);
@@ -717,7 +923,7 @@ void main() {
 
     testWidgets('Windows without a model offers the download', (tester) async {
       await pump(tester, whisper: true);
-      await tester.tap(find.byTooltip('Voice command'));
+      await tester.tap(find.byTooltip('Voice commands'));
       await tester.pumpAndSettle();
       expect(find.text('Download the speech model'), findsOneWidget);
       expect(find.text('Download (190 MB)'), findsOneWidget);
@@ -733,10 +939,60 @@ void main() {
           installed: {WhisperModel.standard},
         ),
       );
-      await tester.tap(find.byTooltip('Voice command'));
+      await tester.tap(find.byTooltip('Voice commands'));
       await tester.pumpAndSettle();
       expect(find.text('Listening…'), findsOneWidget);
       expect(speech.languages, [VoiceLanguage.english]);
+    });
+  });
+
+  group('search results', () {
+    test('which pages are results', () {
+      expect(
+        SearchSite.of('https://www.google.com/search?q=iran'),
+        SearchSite.google,
+      );
+      expect(
+        SearchSite.of('https://www.google.co.uk/search?q=x&start=10'),
+        SearchSite.google,
+      );
+      expect(SearchSite.of('https://www.google.com/'), isNull);
+      expect(SearchSite.of('https://www.google.com/search?q='), isNull);
+      expect(
+        SearchSite.of('https://www.bing.com/search?q=iran'),
+        SearchSite.bing,
+      );
+      expect(
+        SearchSite.of('https://duckduckgo.com/?q=iran&ia=web'),
+        SearchSite.duckDuckGo,
+      );
+      expect(
+        SearchSite.of('https://www.youtube.com/results?search_query=a+b'),
+        SearchSite.youtube,
+      );
+      expect(SearchSite.of('https://www.youtube.com/watch?v=x'), isNull);
+      expect(SearchSite.of('https://notgoogle.com/search?q=x'), isNull);
+      expect(SearchSite.of('about:blank'), isNull);
+    });
+
+    test('page addresses', () {
+      const g = 'https://www.google.com/search?q=iran';
+      expect(resultsPageUrl(g, step: 1), '$g&start=10');
+      expect(resultsPageUrl('$g&start=10', step: 1), '$g&start=20');
+      expect(resultsPageUrl('$g&start=10', step: -1), g);
+      expect(resultsPageUrl(g, step: -1), isNull);
+      expect(resultsPageUrl(g, number: 3), '$g&start=20');
+      expect(resultsPageUrl('$g&start=20', number: 3), isNull);
+      expect(resultsPageUrl('$g&num=20', step: 1), '$g&num=20&start=20');
+      expect(resultsPageNumber('$g&start=20'), 3);
+
+      const b = 'https://www.bing.com/search?q=iran';
+      expect(resultsPageUrl('$b&FORM=QBLH', step: 1), '$b&first=11');
+      expect(resultsPageUrl('$b&first=11', step: 1), '$b&first=21');
+      expect(resultsPageUrl('$b&first=11', number: 1), b);
+      expect(resultsPageNumber('$b&first=21'), 3);
+
+      expect(resultsPageUrl('https://duckduckgo.com/?q=iran', step: 1), isNull);
     });
   });
 }

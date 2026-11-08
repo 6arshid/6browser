@@ -31,9 +31,11 @@ class FakeView implements BrowserView {
   @override
   Future<void> load(String url) async => this.url.value = url;
   @override
-  Future<void> goBack() async {}
+  Future<void> goBack() async => backs++;
+  int backs = 0;
+  int forwards = 0;
   @override
-  Future<void> goForward() async {}
+  Future<void> goForward() async => forwards++;
   int reloads = 0;
   @override
   Future<void> reload() async => reloads++;

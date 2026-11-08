@@ -1,6 +1,10 @@
 import '../../ui/browser_commands.dart';
 import '../tabs/url_input.dart';
 
+/// Languages whose commands are understood (Whisper codes). In others,
+/// what is said is searched for.
+const commandLanguages = {'en', 'fa', 'da'};
+
 /// What a spoken command asks the browser to do.
 sealed class VoiceAction {
   const VoiceAction();
@@ -27,14 +31,53 @@ class VoiceRunCommand extends VoiceAction {
   String toString() => 'VoiceRunCommand(${command.name})';
 }
 
+/// Open result [number] (1-based) of the search results on the page ("open
+/// the second link", «لینک دوم گوگل رو باز کن»), in a new tab when
+/// [newTab].
+class VoiceOpenResult extends VoiceAction {
+  const VoiceOpenResult(this.number, {this.newTab = false});
+
+  final int number;
+  final bool newTab;
+
+  @override
+  String toString() => 'VoiceOpenResult($number${newTab ? ', new tab' : ''})';
+}
+
+/// Another page of search results: [step] pages on (-1 back), or page
+/// [number]. On a page that is not search results [otherwise] runs instead
+/// (a plain "next page" means Forward there); without it nothing happens.
+class VoiceResultsPage extends VoiceAction {
+  const VoiceResultsPage({this.step = 0, this.number, this.otherwise});
+
+  final int step;
+  final int? number;
+  final BrowserCommand? otherwise;
+
+  @override
+  String toString() =>
+      'VoiceResultsPage(${number != null ? 'page $number' : 'step $step'}'
+      '${otherwise != null ? ', else ${otherwise!.name}' : ''})';
+}
+
+/// Stop listening for voice commands ("stop listening", «دیگه گوش نده»).
+class VoiceStopListening extends VoiceAction {
+  const VoiceStopListening();
+
+  @override
+  String toString() => 'VoiceStopListening';
+}
+
 /// Turns what was heard ("search Iran", «جستجو کن ایران», "open YouTube",
-/// «برو به یوتیوب», "new tab"...) into an action. Anything that is not a
-/// command is treated like text typed in the address bar: a search, or a
-/// site when it names one. Null when nothing usable was said (silence, or
-/// just "search" with no words to search for).
+/// «برو به یوتیوب», "new tab", "open the second link"...) into an action.
+/// Anything else is treated like text typed in the address bar: a search,
+/// or a site when it names one; without [searchFreeText] only an address
+/// is, and other words give null. Null also when nothing usable was said
+/// (silence, or just "search" with no words to search for).
 VoiceAction? parseVoiceCommand(
   String heard, {
   String searchTemplate = defaultSearchTemplate,
+  bool searchFreeText = true,
 }) {
   var text = _withoutFillers(normalizeSpeech(heard));
   if (text.isEmpty) return null;
@@ -47,6 +90,12 @@ VoiceAction? parseVoiceCommand(
   if (withoutNewTab != text && withoutNewTab.isNotEmpty) {
     newTab = true;
     text = withoutNewTab;
+  }
+
+  if (_stopListening.hasMatch(text)) return const VoiceStopListening();
+  if (_resultsPage(text) case final page?) return page;
+  if (_resultNumber(text) case final number?) {
+    return VoiceOpenResult(number, newTab: newTab);
   }
 
   for (final (pattern, command) in _commands) {
@@ -92,7 +141,190 @@ VoiceAction? parseVoiceCommand(
   }
 
   // No command: like typing in the address bar.
-  return go(resolveInput(text, searchTemplate: searchTemplate));
+  final url = resolveInput(text, searchTemplate: searchTemplate);
+  if (!searchFreeText && url == search(text)) return null;
+  return go(url);
+}
+
+/// 1 to 10 in words, as ordinals and as numbers, in English, Persian and
+/// Danish. Persian ordinals also take -ین before the noun («دومین لینک»).
+const _numberWords = <String, int>{
+  'first': 1, 'second': 2, 'third': 3, 'fourth': 4, 'fifth': 5, //
+  'sixth': 6, 'seventh': 7, 'eighth': 8, 'ninth': 9, 'tenth': 10,
+  'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6,
+  'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10, 'top': 1,
+  'اول': 1, 'اولی': 1, 'یکم': 1, 'یکمی': 1, 'نخست': 1, 'یک': 1,
+  'دوم': 2, 'دومی': 2, 'دو': 2,
+  'سوم': 3, 'سومی': 3, 'سیوم': 3, 'سه': 3,
+  'چهارم': 4, 'چهارمی': 4, 'چهار': 4,
+  'پنجم': 5, 'پنجمی': 5, 'پنج': 5,
+  'ششم': 6, 'ششمی': 6, 'شیشم': 6, 'شش': 6, 'شیش': 6,
+  'هفتم': 7, 'هفتمی': 7, 'هفت': 7,
+  'هشتم': 8, 'هشتمی': 8, 'هشت': 8,
+  'نهم': 9, 'نهمی': 9, 'نه': 9,
+  'دهم': 10, 'دهمی': 10, 'ده': 10,
+  'første': 1, 'anden': 2, 'andet': 2, 'tredje': 3, 'fjerde': 4,
+  'femte': 5, 'sjette': 6, 'syvende': 7, 'ottende': 8, 'niende': 9,
+  'tiende': 10,
+  'en': 1, 'et': 1, 'to': 2, 'tre': 3, 'fire': 4, 'fem': 5, 'seks': 6,
+  'syv': 7, 'otte': 8, 'ni': 9, 'ti': 10,
+};
+
+final _digitNumber = RegExp(r'^(\d{1,2})(?:st|nd|rd|th|م|ام|مین|ین)?$');
+
+/// The number [word] says, 1 to 50, or null.
+int? _number(String word) {
+  final n =
+      int.tryParse(_digitNumber.firstMatch(word)?.group(1) ?? '') ??
+      _numberWords[word] ??
+      (word.endsWith('ین')
+          ? _numberWords[word.substring(0, word.length - 2)]
+          : null);
+  return n != null && n >= 1 && n <= 50 ? n : null;
+}
+
+final _stopListening = _full(
+  'stop listening|stop (?:the )?voice(?: commands?| control)?|'
+  'turn off (?:the )?(?:mic|microphone|voice(?: commands?| control)?)|'
+  '(?:mic|microphone) off|close (?:the )?(?:mic|microphone|voice)|'
+  '(?:دیگه |دیگر )?گوش (?:نده|نکن)|'
+  '(?:میکروفون|میکروفن|میک)(?: رو| را)? (?:خاموش|ببند|قطع)(?: کن)?|'
+  '(?:خاموش|قطع) کن (?:میکروفون|میکروفن|میک)|'
+  'stop med at lytte|hold op med at lytte|'
+  'sluk (?:for )?(?:mikrofonen|stemmestyring(?:en)?)',
+);
+
+// What a numbered result is called. Not "page" or «صفحه»: "second page"
+// is a page of results.
+const _resultNoun =
+    '(?:links?|results?|search results?|sites?|websites?|videos?|options?|'
+    'items?|entry|entries|hits?|one|'
+    'لینک|نتیجه|سایت|ویدیو|ویدئو|ویدیوی|ویدئوی|کلیپ|گزینه|مورد|آیتم|'
+    'linket|resultat|resultatet|søgeresultat|videoen)';
+const _resultQualifier = '(?:google|youtube|bing|search|søge)';
+
+/// Verbs around a numbered result, dropped: "open", «روی ... کلیک کن».
+final _resultLead = RegExp(
+  r'^(?:(?:open|click(?: on)?|go to|visit|play|watch|show(?: me)?|select|'
+  r'choose|pick|take me to|tap(?: on)?|load|bring up|launch|'
+  r'برو(?: به| تو| توی| روی| رو)?|بریم(?: به| تو)?|روی|کلیک کن(?: روی| رو)?|'
+  r'بزن(?: روی| رو)?|باز کن|بازکن|پخش کن|پلی کن|اوپن|'
+  r'åbn|klik på|gå til|gå ind på|vælg|afspil|vis(?: mig)?) )+',
+  unicode: true,
+);
+final _resultTail = RegExp(
+  r'(?: (?:رو|را|و|باز کن|بازش کن|بازکن|بیار|بالا بیار|نشون بده|نشان بده|'
+  r'کلیک کن|بزن|پخش کن|پلی کن|اجرا کن|برو|اوپن کن|'
+  // Where the result is: "on Google", «گوگل», «تو نتایج».
+  r'(?:on|from|in|of|at) (?:the )?(?:google|bing|duckduckgo|duck duck go|'
+  r'youtube|results|search results|search|search page|page|list)|'
+  r'(?:(?:از|تو|توی|در|داخل) )?(?:گوگل|بینگ|یوتیوب|داک داک گو|نتایج|'
+  r'نتیجه ها|جستجو|سرچ|صفحه|لیست)|'
+  r'(?:på|fra|i) (?:google|bing|youtube|resultaterne|søgningen|siden|'
+  r'listen)))+$',
+  unicode: true,
+);
+final _resultPatterns = [
+  // "the second link", "2nd google result", «دومین لینک», "det andet link"
+  _full('(?:the |det |den )?(?<n>\\S+) (?:$_resultQualifier ?)?$_resultNoun'),
+  // "link 2", "result number three", «لینک دوم», «لینک شماره دو»
+  _full(
+    '(?:$_resultQualifier )?$_resultNoun(?: ی)? '
+    '(?:number |nummer |no |شماره |نمره )?(?<n>\\S+?)(?: ی| یی)?',
+  ),
+];
+
+/// The number of the result asked for: "open the second link", «لینک دوم
+/// گوگل رو باز کن», "åbn det tredje resultat"; null for anything else.
+int? _resultNumber(String text) {
+  final core = _strip(text, _resultLead, _resultTail);
+  for (final pattern in _resultPatterns) {
+    final n = pattern.firstMatch(core)?.namedGroup('n');
+    if (n != null && _number(n) != null) return _number(n);
+  }
+  return null;
+}
+
+String _strip(String text, RegExp lead, RegExp tail) =>
+    text.replaceFirst(lead, '').replaceFirst(tail, '').trim();
+
+const _pageQualifierEn =
+    '(?:the )?(?:google|bing|duckduckgo|duck duck go|youtube|results|'
+    'search results|search|google results)';
+const _pageQualifierFa =
+    '(?:(?:از|تو|توی|در|داخل) )?(?:گوگل|بینگ|یوتیوب|داک داک گو|نتایج|'
+    'نتیجه ها|جستجو|سرچ)';
+const _pageQualifierDa =
+    '(?:google|bing|youtube|resultaterne|søgningen|søgeresultaterne)';
+const _page = '(?:صفحه(?: ی)?)';
+
+final _pageLead = RegExp(
+  r'^(?:(?:go to|go|show(?: me)?|open|load|take me to|'
+  r'برو(?: به| تو)?|بریم(?: به| تو)?|'
+  r'gå til|gå|vis(?: mig)?|åbn) )+',
+  unicode: true,
+);
+final _pageTail = RegExp(
+  r'(?: (?:رو|را|و|بیار|باز کن|بازکن|نشون بده|نشان بده|برو|بزن))+$',
+  unicode: true,
+);
+
+/// "next page", «صفحه بعد»: the next results page, or Forward elsewhere.
+final _nextPage = _full(
+  '(?:the |den )?(?:next page|næste side)|$_page (?:بعد|بعدی)',
+);
+
+/// Explicitly about search results: "next page of results", «صفحه بعد
+/// گوگل», «نتایج بعدی».
+final _nextResults = _full(
+  '(?:the )?next page (?:of|on|in) $_pageQualifierEn|'
+  '(?:the )?next (?:page of )?(?:the )?(?:google |search )?results|'
+  '(?:the )?next (?:google|bing|search|results) page|more results|'
+  '$_page (?:بعد|بعدی)(?: ی)? $_pageQualifierFa|'
+  '(?:نتایج|نتیجه ها)(?: ی)? (?:بعدی|بیشتر)|(?:بقیه|ادامه)(?: ی)? (?:نتایج|نتیجه ها)|'
+  '(?:den )?næste side (?:af|med|i|på) $_pageQualifierDa|'
+  '(?:flere|næste) (?:søge)?resultater',
+);
+final _previousResults = _full(
+  '(?:the )?previous page (?:of|on|in) $_pageQualifierEn|'
+  '(?:the )?previous (?:page of )?(?:the )?(?:google |search )?results|'
+  '(?:the )?previous (?:google|bing|search|results) page|'
+  '$_page (?:قبل|قبلی)(?: ی)? $_pageQualifierFa|(?:نتایج|نتیجه ها)(?: ی)? قبلی|'
+  '(?:den )?forrige side (?:af|med|i|på) $_pageQualifierDa|'
+  'forrige (?:søge)?resultater',
+);
+final _numberedPage = [
+  // "page 2", "page number three of the results", «صفحه دوم گوگل»,
+  // «صفحه شماره 3», "side 2"
+  _full(
+    '(?:the )?(?:page|side|$_page) (?:number |nummer |شماره )?(?<n>\\S+?)'
+    '(?: ی)?(?: (?:of|on|in) $_pageQualifierEn| $_pageQualifierFa|'
+    ' (?:af|i|på) $_pageQualifierDa)?',
+  ),
+  // "the second page", «دومین صفحه», "den anden side"
+  _full(
+    '(?:the |den )?(?<n>\\S+) (?:page|side|$_page)'
+    '(?: (?:of|on|in) $_pageQualifierEn| $_pageQualifierFa|'
+    ' (?:af|i|på) $_pageQualifierDa)?',
+  ),
+];
+
+/// A page of search results: "next page of Google", «برو صفحه بعد گوگل»,
+/// «صفحه سوم», "previous results"; null for anything else.
+VoiceResultsPage? _resultsPage(String text) {
+  final core = _strip(text, _pageLead, _pageTail);
+  if (_nextPage.hasMatch(core)) {
+    return const VoiceResultsPage(step: 1, otherwise: BrowserCommand.forward);
+  }
+  if (_nextResults.hasMatch(core)) return const VoiceResultsPage(step: 1);
+  if (_previousResults.hasMatch(core)) return const VoiceResultsPage(step: -1);
+  for (final pattern in _numberedPage) {
+    final n = pattern.firstMatch(core)?.namedGroup('n');
+    if (n != null && _number(n) != null) {
+      return VoiceResultsPage(number: _number(n));
+    }
+  }
+  return null;
 }
 
 /// Lower-case text with Arabic letter forms turned Persian, Persian digits
@@ -241,12 +473,10 @@ final _commands = <(RegExp, BrowserCommand)>[
     ),
     BrowserCommand.back,
   ),
+  // "next page" is a page of search results there, else Forward (see
+  // _resultsPage).
   (
-    _full(
-      '(?:go )?forward|(?:go to )?(?:the )?next page|'
-      '(?:برو )?(?:به )?جلو|(?:برو )?(?:به )?صفحه (?:بعد|بعدی)|فوروارد|'
-      '(?:gå )?frem(?:ad)?|(?:gå til )?(?:den )?næste side',
-    ),
+    _full('(?:go )?forward|(?:برو )?(?:به )?جلو|فوروارد|(?:gå )?frem(?:ad)?'),
     BrowserCommand.forward,
   ),
   (

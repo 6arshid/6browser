@@ -392,19 +392,49 @@ engine and stays removed); badges; macOS/Linux pipe.
 
 A microphone in the address bar on every page (and in the New Tab page's
 search box), Ctrl+Shift+Space (`BrowserCommand.voiceCommand`; on a web
-page it arrives as an unhandled page key) and "Voice command…" in the main
-menu: "search Iran", «جستجو کن ایران», "open YouTube", «برو به یوتیوب»,
-"new tab", «برگرد»... The words go through `parseVoiceCommand`
+page it arrives as an unhandled page key) and "Voice commands" in the main
+menu turn voice commands on and off: "search Iran", «جستجو کن ایران», "open
+YouTube", «برو به یوتیوب», "new tab", «برگرد», "open the second link",
+«صفحه بعد گوگل»... The words go through `parseVoiceCommand`
 (`lib/features/voice/voice_commands.dart`): browser commands (the
 `BrowserCommand` table), searches (also on YouTube, Wikipedia...), sites by
-name, and otherwise the same as typing in the address bar. Only one voice
-panel opens at a time.
+name, numbered search results, pages of results, "stop listening", and
+otherwise the same as typing in the address bar.
+
+**Always listening while on** (2026-11-08, `VoiceDock` in
+`lib/features/voice/voice_panel.dart`, `voiceModeProvider`): a card in the
+bottom right corner of the page area listens, carries the command out in
+the selected tab and listens again, until its × (or the mic, the shortcut,
+"stop listening", «دیگه گوش نده»). Silence just starts over (three
+failures within 1.5 s of starting in a row stop it, so a broken microphone
+does not spin); other errors stop it until the mic is tapped. It pauses
+while a page, dialog or menu covers the browser (the shell's route is not
+current) and while 6browser is minimized/hidden, not merely unfocused. In
+English, Persian and Danish words that are not a command are **not**
+searched for (`searchFreeText: false`): a video playing, people talking or
+a Whisper invention would otherwise replace the page with a search. Other
+languages, which have no commands, still search what is said.
+
+**Numbered results and pages** (`lib/features/voice/search_results.dart`):
+on Google, Bing, DuckDuckGo and YouTube results pages, "open the second
+link" / «لینک دوم گوگل رو باز کن» / «دومین نتیجه» (1-10 in words, any
+number in digits, "in a new tab" works) runs a page script that lists the
+visible results (Google `#search a h3`, ads are outside #search; Bing
+`#b_results > li.b_algo h2 a`; DuckDuckGo `article[data-testid=result]
+a[data-testid=result-title-a]`; YouTube `ytd-search ytd-video-renderer
+a#video-title`, videos only) and sends back the address with a per-call
+token; the app opens it only if it is http(s). Selectors and the generated
+scripts were checked on the live sites in Chrome on 2026-11-08 (result 2
+was the second title on each). "Next page", «صفحه بعد گوگل», «صفحه سوم»
+change Google's `start` / Bing's `first`; on DuckDuckGo "next page" presses
+"More results"; YouTube has no pages. A plain "next page" / «صفحه بعد» away
+from results pages is Forward; "previous page" is always Back.
 
 **First-run tour** (`lib/features/voice/voice_tour.dart`): 1.2 s after the
 first tabs appear, if the `voiceTourSeen` setting is unset, a spotlight
 closes in on the address bar microphone and a three-step card explains it
 (the demo types example commands in the chosen voice language). Tapping the
-spotlighted microphone or "Try it now" opens the voice panel; Skip/Esc just
+spotlighted microphone or "Try it now" turns voice commands on; Skip/Esc just
 closes. Either way `voiceTourSeen` is set. It is skipped for this launch if
 another page or dialog is open, or in full screen. Settings > Voice
 commands > "Show the voice tour" replays it. `voiceTourEnabledProvider` is
@@ -437,7 +467,7 @@ it.
   context size of the previous `whisper_full` call, so an idle "prime" run
   on silence at 256 keeps it cheap.
 - **The language is chosen by hand** (Settings > Voice commands, or the
-  globe button in the voice panel; default: the first of the system's
+  globe button in the voice dock; default: the first of the system's
   languages Whisper handles well, 57 in all). Automatic detection between
   Persian and English was the first default, but speech in any other
   language (Danish) came out as English or Persian gibberish, and forcing

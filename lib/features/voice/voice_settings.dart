@@ -30,9 +30,11 @@ class VoiceSettings extends ConsumerWidget {
         Text(
           'Click the microphone in the address bar'
           '${keyboard ? ' (or press ${shortcutFor(BrowserCommand.voiceCommand)})' : ''}'
-          ' and say what to do: "search Iran", "open YouTube", "new tab", '
-          '"go back". Commands are understood in English, Persian and '
-          'Danish; in other languages, what you say is searched for.',
+          ' to turn voice commands on. 6browser then listens until you '
+          'close the voice box in the corner: say "search Iran", "open '
+          'YouTube", "open the second link", "next page", "go back". '
+          'Commands are understood in English, Persian and Danish; in '
+          'other languages, what you say is searched for.',
           style: TextStyle(color: muted),
         ),
         Align(

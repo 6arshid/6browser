@@ -148,7 +148,7 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
     _touring = false;
     await ref.read(databaseProvider).setSetting(voiceTourSeenSetting, 'true');
     if (mounted && result == VoiceTourResult.tryIt) {
-      _run(BrowserCommand.voiceCommand);
+      ref.read(voiceModeProvider.notifier).start();
     }
   }
 
@@ -352,7 +352,7 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
       case BrowserCommand.menu:
         _menuKey.currentState?.showButtonMenu();
       case BrowserCommand.voiceCommand:
-        if (view != null) runVoiceCommand(context, ref, view, run: _run);
+        toggleVoiceCommands(ref);
       case BrowserCommand.devTools:
         view?.openDevTools();
     }
@@ -516,6 +516,14 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
                                     ],
                                   ),
                                 ),
+                                // Voice commands, listening until closed.
+                                if (ref.watch(voiceModeProvider))
+                                  Positioned(
+                                    key: const ValueKey('voice-dock'),
+                                    right: 16,
+                                    bottom: 16,
+                                    child: chrome(VoiceDock(run: _run)),
+                                  ),
                                 if (_findView case final findView?)
                                   Positioned(
                                     top: 0,

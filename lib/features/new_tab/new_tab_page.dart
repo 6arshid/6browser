@@ -220,14 +220,11 @@ class _SearchBox extends ConsumerWidget {
             suffixIcon: voice
                 ? Padding(
                     padding: const EdgeInsetsDirectional.only(end: 4),
-                    child: IconButton(
-                      tooltip: 'Voice command',
-                      icon: Icon(
-                        CupertinoIcons.mic,
-                        size: 20,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                      onPressed: () => runVoiceCommand(context, ref, view),
+                    child: VoiceMicButton(
+                      color: scheme.onSurfaceVariant,
+                      size: 20,
+                      width: 40,
+                      height: 40,
                     ),
                   )
                 : null,

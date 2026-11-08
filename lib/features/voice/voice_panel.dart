@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
@@ -9,11 +10,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:whisper_voice/whisper_voice.dart';
 
 import '../../data/providers.dart';
-import '../../engine/browser_engine.dart';
 import '../../ui/browser_commands.dart';
 import '../../ui/browser_theme.dart';
 import '../settings/app_settings.dart';
 import '../tabs/tabs_controller.dart';
+import 'search_results.dart';
 import 'speech_input.dart';
 import 'voice_commands.dart';
 import 'whisper_models.dart';
@@ -44,64 +45,43 @@ final usesWhisperModelsProvider = Provider<bool>(
   (ref) => !kIsWeb && Platform.isWindows,
 );
 
-/// Navigators that show a voice panel now, so a second click or the
-/// shortcut does not open another one above it.
-final _panelOpen = Expando<bool>();
+/// Voice commands are on: the dock in the corner of the window listens,
+/// carries out what is said and listens again, until it is closed.
+final voiceModeProvider = NotifierProvider<VoiceMode, bool>(VoiceMode.new);
 
-/// Listens for a voice command and carries it out in [view]'s tab.
-/// Browser commands go to [run], or to the [BrowserCommands] above
-/// [context].
-Future<void> runVoiceCommand(
-  BuildContext context,
-  WidgetRef ref,
-  BrowserView view, {
-  void Function(BrowserCommand command)? run,
-}) async {
-  if (ref.read(speechInputProvider) == null) return;
-  run ??= BrowserCommands.maybeOf(context)?.run;
-  final navigator = Navigator.of(context, rootNavigator: true);
-  if (_panelOpen[navigator] == true) return;
-  _panelOpen[navigator] = true;
-  final VoiceAction? action;
-  try {
-    action = await showDialog<VoiceAction>(
-      context: context,
-      builder: (_) => const VoicePanel(),
-    );
-  } finally {
-    _panelOpen[navigator] = null;
-  }
-  switch (action) {
-    case null:
-      return;
-    case VoiceNavigate(:final url, newTab: true):
-      ref
-          .read(tabsProvider.notifier)
-          .newTab(url: url, incognito: view.incognito);
-    case VoiceNavigate(:final url):
-      await view.load(url);
-    case VoiceRunCommand(:final command):
-      run?.call(command);
-  }
+class VoiceMode extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void start() => state = true;
+  void stop() => state = false;
 }
 
-/// The microphone button: in the address bar on every page. Clicking it
-/// listens for a command and carries it out. Nothing where voice commands
-/// are not available.
+/// The microphone buttons and the shortcut: voice commands on, or off when
+/// they are on. Nothing where voice commands are not available.
+void toggleVoiceCommands(WidgetRef ref) {
+  if (ref.read(speechInputProvider) == null) return;
+  final mode = ref.read(voiceModeProvider.notifier);
+  ref.read(voiceModeProvider) ? mode.stop() : mode.start();
+}
+
+/// The microphone button: in the address bar on every page. It turns voice
+/// commands on and off, and is filled while they are on. Nothing where
+/// voice commands are not available.
 class VoiceMicButton extends ConsumerWidget {
   const VoiceMicButton({
     super.key,
-    required this.view,
     required this.color,
-    this.tooltip = 'Voice command',
+    this.showShortcut = false,
     this.size = 14,
     this.width = 28,
     this.height = 26,
   });
 
-  final BrowserView view;
   final Color color;
-  final String tooltip;
+
+  /// Ctrl+Shift+Space in the tooltip (where there is a keyboard).
+  final bool showShortcut;
   final double size;
   final double width;
   final double height;
@@ -109,51 +89,149 @@ class VoiceMicButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (ref.watch(speechInputProvider) == null) return const SizedBox.shrink();
+    final on = ref.watch(voiceModeProvider);
+    final shortcut = showShortcut
+        ? ' (${shortcutFor(BrowserCommand.voiceCommand)})'
+        : '';
     return IconButton(
-      tooltip: tooltip,
+      tooltip: on
+          ? 'Turn off voice commands$shortcut'
+          : 'Voice commands$shortcut',
       iconSize: size,
-      color: color,
+      color: on ? Theme.of(context).colorScheme.primary : color,
       padding: EdgeInsets.zero,
       constraints: BoxConstraints.tightFor(width: width, height: height),
       style: IconButton.styleFrom(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
       ),
-      icon: const Icon(CupertinoIcons.mic),
-      onPressed: () => runVoiceCommand(context, ref, view),
+      icon: Icon(on ? CupertinoIcons.mic_fill : CupertinoIcons.mic),
+      onPressed: () => toggleVoiceCommands(ref),
     );
   }
 }
 
-enum _Phase { starting, download, listening, recognizing, failed, unclear }
+enum _Phase {
+  /// Not listening: about to start, or paused while 6browser is minimized
+  /// or a page or menu covers it.
+  idle,
 
-/// Listens and shows what is happening; closes with the [VoiceAction] that
-/// was asked for.
-class VoicePanel extends ConsumerStatefulWidget {
-  const VoicePanel({super.key});
+  /// Waiting for the speech model folder to be checked (Windows).
+  starting,
+  download,
+  listening,
+  recognizing,
 
-  @override
-  ConsumerState<VoicePanel> createState() => _VoicePanelState();
+  /// Stopped by an error; the microphone tries again.
+  stopped,
 }
 
-class _VoicePanelState extends ConsumerState<VoicePanel> {
+/// The voice commands dock, in the bottom right corner of the page while
+/// voice commands are on. It listens all the time: each command is carried
+/// out in the selected tab and then it listens for the next one, until it
+/// is closed (or told "stop listening"). It pauses while 6browser is
+/// minimized or a page, dialog or menu is open over the browser.
+///
+/// In English, Persian and Danish only commands are carried out; other
+/// words (a video playing, people talking in the room) are not searched
+/// for. In other languages, where commands are not understood, what is
+/// said is searched for.
+class VoiceDock extends ConsumerStatefulWidget {
+  const VoiceDock({super.key, required this.run});
+
+  /// Runs browser commands (back, new tab...).
+  final void Function(BrowserCommand command) run;
+
+  @override
+  ConsumerState<VoiceDock> createState() => _VoiceDockState();
+}
+
+class _VoiceDockState extends ConsumerState<VoiceDock> {
   late final SpeechInput? _input = ref.read(speechInputProvider);
+  late final AppLifecycleListener _lifecycle;
   StreamSubscription<SpeechEvent>? _session;
-  _Phase _phase = _Phase.starting;
-  double _level = 0;
-  String _heard = '';
+  _Phase _phase = _Phase.idle;
   SpeechError? _error;
+  double _level = 0;
+
+  /// Words recognized so far (Android shows them as they come).
+  String _partial = '';
+
+  /// The last thing said, and what came of it: [_note] says why nothing
+  /// was done; [_done] when it was.
+  String? _heard;
+  String? _note;
+  bool _done = false;
+
+  /// A language picked in the dock, until the settings have it; and the
+  /// one the current session listens in.
+  VoiceLanguage? _picked;
+  VoiceLanguage? _listeningIn;
+  VoiceLanguage get _language =>
+      _picked ?? ref.read(appSettingsProvider).voiceLanguage;
+
+  /// 6browser is on screen, and no page, dialog or menu covers the
+  /// browser.
+  bool _visible = true;
+  ModalRoute<Object?>? _route;
+  bool get _front => _route?.isCurrent ?? true;
+  bool get _wanted => _visible && _front;
+
+  /// "Didn't catch that" right after starting, in a row: then it stops
+  /// instead of starting over and over.
+  DateTime _startedAt = DateTime(0);
+  int _quickMisses = 0;
 
   @override
   void initState() {
     super.initState();
-    _listen();
+    _visible = _onScreen(WidgetsBinding.instance.lifecycleState);
+    _lifecycle = AppLifecycleListener(
+      onStateChange: (state) {
+        _visible = _onScreen(state);
+        _sync();
+      },
+    );
+  }
+
+  /// Minimized or hidden: not on screen. Another window being in front
+  /// ("inactive") is not enough to pause.
+  static bool _onScreen(AppLifecycleState? state) =>
+      state == null ||
+      state == AppLifecycleState.resumed ||
+      state == AppLifecycleState.inactive;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Called again when a page, dialog or menu opens over the browser or
+    // closes.
+    _route = ModalRoute.of(context);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _sync());
   }
 
   @override
   void dispose() {
+    _lifecycle.dispose();
     _session?.cancel();
     _input?.cancel();
     super.dispose();
+  }
+
+  /// Listens when it should and is not yet; pauses when it should not.
+  void _sync() {
+    if (!mounted) return;
+    if (_wanted) {
+      if (_phase == _Phase.idle) _listen();
+      return;
+    }
+    if (_phase case _Phase.starting || _Phase.listening || _Phase.recognizing) {
+      _session?.cancel();
+      _session = null;
+      _input?.cancel();
+      _set(_Phase.idle);
+    } else {
+      setState(() {}); // shows "Paused"
+    }
   }
 
   bool get _modelMissing {
@@ -162,33 +240,37 @@ class _VoicePanelState extends ConsumerState<VoicePanel> {
     return ref.read(whisperModelsProvider).fileOf(model) == null;
   }
 
-  void _listen([VoiceLanguage? language]) {
+  void _listen() {
     final input = _input;
-    if (input == null) return;
+    if (input == null || !mounted) return;
     _session?.cancel();
     _session = null;
+    if (!_wanted) return _set(_Phase.idle);
     if (ref.read(usesWhisperModelsProvider) &&
         ref.read(whisperModelsProvider).folder == null) {
-      _set(_Phase.starting); // waiting for the model folder to be checked
-      return;
+      return _set(_Phase.starting); // the model folder is being checked
     }
-    if (_modelMissing) {
-      _set(_Phase.download);
-      return;
-    }
+    if (_modelMissing) return _set(_Phase.download);
     _set(_Phase.listening);
-    _session = input
-        .listen(language ?? ref.read(appSettingsProvider).voiceLanguage)
-        .listen(_onEvent);
+    _startedAt = DateTime.now();
+    final language = _listeningIn = _language;
+    _session = input.listen(language).listen(_onEvent);
   }
 
-  void _set(_Phase phase, {SpeechError? error, String heard = ''}) {
+  void _pick(VoiceLanguage language) {
+    _picked = language;
+    ref.read(databaseProvider).setSetting('voiceLanguage', language.code);
+    // The picker paused listening; otherwise start over in [language].
+    if (_phase == _Phase.listening) _listen();
+  }
+
+  void _set(_Phase phase, {SpeechError? error}) {
     if (!mounted) return;
     setState(() {
       _phase = phase;
       _error = error;
-      _heard = heard;
       _level = 0;
+      _partial = '';
     });
   }
 
@@ -198,31 +280,145 @@ class _VoicePanelState extends ConsumerState<VoicePanel> {
       case SpeechLevel(:final level):
         setState(() => _level = level);
       case SpeechPartial(:final text):
-        setState(() => _heard = text);
+        setState(() => _partial = text);
       case SpeechRecognizing():
-        _set(_Phase.recognizing, heard: _heard);
+        _set(_Phase.recognizing);
       case SpeechResult(:final text):
-        final action = parseVoiceCommand(
-          text,
-          searchTemplate: ref.read(appSettingsProvider).searchTemplate,
-        );
-        if (action == null) {
-          _set(_Phase.unclear, heard: text);
-        } else {
-          Navigator.of(context).pop(action);
-        }
+        _quickMisses = 0;
+        _onSpeech(text);
       case SpeechFailed(:final error):
-        _set(
-          error == SpeechError.modelMissing ? _Phase.download : _Phase.failed,
-          error: error,
-        );
+        _onFailure(error);
     }
   }
 
-  void _setLanguage(VoiceLanguage language) {
-    ref.read(databaseProvider).setSetting('voiceLanguage', language.code);
-    if (_phase != _Phase.download) _listen(language);
+  Future<void> _onSpeech(String text) async {
+    final settings = ref.read(appSettingsProvider);
+    final language = _listeningIn ?? _language;
+    final action = parseVoiceCommand(
+      text,
+      searchTemplate: settings.searchTemplate,
+      searchFreeText: !commandLanguages.contains(language.code),
+    );
+    setState(() {
+      _heard = text;
+      _note = null;
+      _done = false;
+    });
+    if (action is VoiceStopListening) {
+      ref.read(voiceModeProvider.notifier).stop();
+      return;
+    }
+    final note = action == null
+        ? _notACommand(language)
+        : await _perform(action);
+    if (!mounted) return;
+    setState(() {
+      _note = note;
+      _done = note == null;
+    });
+    _listen();
   }
+
+  void _onFailure(SpeechError error) {
+    switch (error) {
+      case SpeechError.modelMissing:
+        _set(_Phase.download);
+      case SpeechError.noSpeech:
+        // Silence: listen again, unless it keeps failing at once.
+        final quick =
+            DateTime.now().difference(_startedAt) <
+            const Duration(milliseconds: 1500);
+        _quickMisses = quick ? _quickMisses + 1 : 0;
+        if (_quickMisses >= 3) {
+          _quickMisses = 0;
+          _set(_Phase.stopped, error: error);
+        } else {
+          _listen();
+        }
+      default:
+        _set(_Phase.stopped, error: error);
+    }
+  }
+
+  /// Carries out [action] in the selected tab. Returns why nothing was
+  /// done, or null when it was.
+  Future<String?> _perform(VoiceAction action) async {
+    final tabs = ref.read(tabsProvider.notifier);
+    final view = ref.read(tabsProvider).active?.view;
+    void open(String url, {required bool newTab}) {
+      if (newTab || view == null) {
+        tabs.newTab(url: url, incognito: view?.incognito ?? false);
+      } else {
+        view.load(url);
+      }
+    }
+
+    switch (action) {
+      case VoiceStopListening():
+        ref.read(voiceModeProvider.notifier).stop();
+      case VoiceNavigate(:final url, :final newTab):
+        open(url, newTab: newTab);
+      case VoiceRunCommand(:final command):
+        widget.run(command);
+      case VoiceOpenResult(:final number, :final newTab):
+        if (view == null) return _searchFirst;
+        switch (await findResult(view, number)) {
+          case ResultFound(:final url):
+            open(url, newTab: newTab);
+          case ResultMissing(:final count):
+            return count == 0
+                ? 'No results found on this page.'
+                : 'There is no result $number here: this page shows $count.';
+          case NotResultsPage():
+            return _searchFirst;
+          case PageSilent():
+            return 'The page did not answer. Try again once it has loaded.';
+        }
+      case VoiceResultsPage(:final step, :final number, :final otherwise):
+        final url = view?.url.value ?? '';
+        final site = SearchSite.of(url);
+        if (view == null || site == null) {
+          if (otherwise != null) {
+            widget.run(otherwise);
+            return null;
+          }
+          return 'This is not a page of search results.';
+        }
+        if (site == SearchSite.duckDuckGo && number == null && step > 0) {
+          final reply = await askPage(
+            view,
+            (token, post) => moreResultsScript(token: token, post: post),
+          );
+          return reply?['more'] == true ? null : 'There are no more results.';
+        }
+        if (site == SearchSite.duckDuckGo || site == SearchSite.youtube) {
+          return '${site.label} has no pages of results: it shows more as '
+              'you scroll down.';
+        }
+        final next = resultsPageUrl(url, step: step, number: number);
+        if (next == null) {
+          return number != null
+              ? 'This is page $number already.'
+              : 'This is the first page.';
+        }
+        await view.load(next);
+    }
+    return null;
+  }
+
+  static const _searchFirst =
+      'Numbered links work on Google, Bing, DuckDuckGo and YouTube '
+      'results: search first.';
+
+  /// Why words that are not a command were not searched for.
+  static String _notACommand(VoiceLanguage language) => switch (language.code) {
+    'fa' => 'این دستور نبود. برای جستجو بگویید «جستجو کن …».',
+    'da' => 'Det var ikke en kommando. Sig “søg efter …” for at søge.',
+    'en' => 'That was not a command. To search, say “search …”.',
+    _ => 'Not sure what to do with that.',
+  };
+
+  void _close() => ref.read(voiceModeProvider.notifier).stop();
 
   @override
   Widget build(BuildContext context) {
@@ -239,145 +435,202 @@ class _VoicePanelState extends ConsumerState<VoicePanel> {
         }
       });
     }
-    return Dialog(
+    // Another language chosen (here or in Settings): listen in it.
+    ref.listen(appSettingsProvider.select((s) => s.voiceLanguage), (_, now) {
+      if (now == _picked) _picked = null;
+      if (_phase == _Phase.listening && _language != _listeningIn) _listen();
+    });
+    final scheme = Theme.of(context).colorScheme;
+    final width = math.min(340.0, MediaQuery.sizeOf(context).width - 32);
+    return Material(
+      color: scheme.surfaceContainerHigh,
+      elevation: 8,
+      shadowColor: Colors.black54,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(Ui.radiusLarge * 1.5),
+        side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.6)),
       ),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: width,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 8, 8, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Align(
-                alignment: AlignmentDirectional.centerEnd,
-                child: IconButton(
-                  tooltip: 'Close',
-                  icon: const Icon(CupertinoIcons.xmark, size: 18),
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsetsDirectional.only(end: 16),
-                child: _phase == _Phase.download
-                    ? _ModelDownload(
-                        onCancel: () => Navigator.of(context).pop(),
-                      )
-                    : _listening(context),
-              ),
-            ],
-          ),
+          padding: const EdgeInsets.fromLTRB(12, 8, 6, 10),
+          child: _phase == _Phase.download
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Align(alignment: Alignment.centerRight, child: _closer()),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 0, 10, 4),
+                      child: _ModelDownload(onCancel: _close),
+                    ),
+                  ],
+                )
+              : _listening(context),
         ),
       ),
     );
   }
 
+  Widget _closer() => IconButton(
+    tooltip: 'Turn off voice commands',
+    iconSize: 16,
+    visualDensity: VisualDensity.compact,
+    icon: const Icon(CupertinoIcons.xmark),
+    onPressed: _close,
+  );
+
   Widget _listening(BuildContext context) {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
+    ref.watch(appSettingsProvider.select((s) => s.voiceLanguage));
+    final language = _language;
     final listening = _phase == _Phase.listening;
-    final retry = _phase == _Phase.failed || _phase == _Phase.unclear;
-    final language = ref.watch(appSettingsProvider).voiceLanguage;
-    final title = switch (_phase) {
-      _Phase.starting => 'Getting ready…',
-      _Phase.listening => 'Listening…',
-      _Phase.recognizing => 'Recognizing…',
-      _Phase.unclear => 'Not sure what to do with that.',
-      _Phase.failed => _error?.message ?? SpeechError.failed.message,
-      _Phase.download => '',
+    final stopped = _phase == _Phase.stopped;
+    final paused = _phase == _Phase.idle && !_wanted;
+    final (String title, String? detail) = switch (_phase) {
+      _ when paused => ('Paused', 'Listens again when you are back.'),
+      _Phase.idle || _Phase.starting => ('Getting ready…', null),
+      _Phase.listening => ('Listening…', _partial.isEmpty ? null : _partial),
+      _Phase.recognizing => ('Recognizing…', null),
+      _Phase.stopped => (
+        _error?.message ?? SpeechError.failed.message,
+        'Tap the microphone to listen again.',
+      ),
+      _Phase.download => ('', null),
     };
+    final heard = _heard;
+    final small = theme.textTheme.bodySmall?.copyWith(color: muted);
     return Column(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _MicOrb(
-          level: _level,
-          busy: _phase == _Phase.recognizing || _phase == _Phase.starting,
-          active: listening,
-          tooltip: listening
-              ? 'Done speaking'
-              : retry
-              ? 'Try again'
-              : null,
-          onTap: listening
-              ? () => _input?.finish()
-              : retry
-              ? () => _listen()
-              : null,
-        ),
-        const SizedBox(height: 18),
-        Text(
-          title,
-          textAlign: TextAlign.center,
-          style: theme.textTheme.titleMedium,
-        ),
-        if (_heard.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          Text(
-            '“$_heard”',
-            key: const ValueKey('voice-heard'),
-            textAlign: TextAlign.center,
-            textDirection: voiceTextDirection(_heard),
-            style: theme.textTheme.titleLarge?.copyWith(fontSize: 19),
-          ),
-        ],
-        const SizedBox(height: 12),
-        Text(
-          retry ? 'Tap the microphone to try again.' : _examples(language),
-          textAlign: TextAlign.center,
-          textDirection: voiceTextDirection(_examples(language)),
-          style: theme.textTheme.bodySmall?.copyWith(color: muted, height: 1.6),
-        ),
-        const SizedBox(height: 18),
         Row(
           children: [
+            _MicOrb(
+              level: _level,
+              busy: _phase == _Phase.recognizing || _phase == _Phase.starting,
+              active: listening,
+              tooltip: listening
+                  ? 'Done speaking'
+                  : stopped
+                  ? 'Listen again'
+                  : null,
+              onTap: listening
+                  ? () => _input?.finish()
+                  : stopped
+                  ? () {
+                      _quickMisses = 0;
+                      _listen();
+                    }
+                  : null,
+            ),
+            const SizedBox(width: 6),
             Expanded(
-              child: Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: PopupMenuButton<VoiceLanguage>(
-                  key: const ValueKey('voice-language'),
-                  tooltip: 'Language you speak',
-                  initialValue: language,
-                  constraints: const BoxConstraints(maxHeight: 380),
-                  onSelected: _setLanguage,
-                  itemBuilder: (_) => [
-                    for (final l in voiceLanguages)
-                      PopupMenuItem(value: l, child: Text(l.label)),
-                  ],
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 6,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(CupertinoIcons.globe, size: 16, color: muted),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            language.nativeName,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Icon(
-                          CupertinoIcons.chevron_down,
-                          size: 12,
-                          color: muted,
-                        ),
-                      ],
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                ),
+                  if (detail != null)
+                    Text(
+                      detail,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      textDirection: voiceTextDirection(detail),
+                      style: small,
+                    ),
+                ],
               ),
             ),
-            if (listening)
-              TextButton(
-                onPressed: () => _input?.finish(),
-                child: const Text('Done'),
-              ),
+            _closer(),
           ],
+        ),
+        if (heard != null) ...[
+          const SizedBox(height: 6),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Icon(
+                  _done
+                      ? CupertinoIcons.checkmark_circle_fill
+                      : CupertinoIcons.info_circle,
+                  size: 15,
+                  color: _done ? theme.colorScheme.primary : muted,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  voiceTextDirection(heard) == TextDirection.rtl
+                      ? '«$heard»'
+                      : '“$heard”',
+                  key: const ValueKey('voice-heard'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textDirection: voiceTextDirection(heard),
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ),
+            ],
+          ),
+          if (_note case final note?)
+            Padding(
+              padding: const EdgeInsetsDirectional.only(start: 21, top: 2),
+              child: Text(
+                note,
+                textDirection: voiceTextDirection(note),
+                style: small,
+              ),
+            ),
+        ] else if (!stopped) ...[
+          const SizedBox(height: 6),
+          Text(
+            _examples(language),
+            textDirection: voiceTextDirection(_examples(language)),
+            style: small?.copyWith(height: 1.5),
+          ),
+        ],
+        const SizedBox(height: 4),
+        Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: PopupMenuButton<VoiceLanguage>(
+            key: const ValueKey('voice-language'),
+            tooltip: 'Language you speak',
+            initialValue: language,
+            constraints: const BoxConstraints(maxHeight: 380),
+            onSelected: _pick,
+            itemBuilder: (_) => [
+              for (final l in voiceLanguages)
+                PopupMenuItem(value: l, child: Text(l.label)),
+            ],
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(CupertinoIcons.globe, size: 14, color: muted),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      language.nativeName,
+                      overflow: TextOverflow.ellipsis,
+                      style: small,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(CupertinoIcons.chevron_down, size: 11, color: muted),
+                ],
+              ),
+            ),
+          ),
         ),
       ],
     );
@@ -391,9 +644,15 @@ TextDirection voiceTextDirection(String text) =>
 /// What to say, in the language chosen. Commands are understood in these
 /// three; in any other language what is said is searched for.
 String _examples(VoiceLanguage language) => switch (language.code) {
-  'fa' => 'بگویید: «جستجو کن ایران»، «برو به یوتیوب»، «تب جدید»',
-  'da' => 'Sig: “søg efter Iran”, “åbn YouTube”, “ny fane”',
-  'en' => 'Say “search Iran”, “open YouTube”, “new tab”',
+  'fa' =>
+    'بگویید: «جستجو کن ایران»، «برو به یوتیوب»، «لینک دوم رو باز کن»، '
+        '«صفحه بعد»، «برگرد»',
+  'da' =>
+    'Sig: “søg efter Iran”, “åbn YouTube”, “åbn det andet link”, '
+        '“næste side”, “gå tilbage”',
+  'en' =>
+    'Say “search Iran”, “open YouTube”, “open the second link”, '
+        '“next page”, “go back”',
   _ => 'Say what to search for, or the name of a site to open it.',
 };
 
@@ -408,6 +667,8 @@ class _MicOrb extends StatelessWidget {
     this.onTap,
   });
 
+  static const _size = 40.0;
+
   final double level;
   final bool busy;
   final bool active;
@@ -417,31 +678,28 @@ class _MicOrb extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final halo = 80 + 44 * (active ? level : 0.0);
+    final halo = _size + 6 + 18 * (active ? level : 0.0);
+    final lit = active || onTap != null;
     final button = Material(
-      color: active || onTap != null
-          ? scheme.primary
-          : scheme.surfaceContainerHighest,
+      color: lit ? scheme.primary : scheme.surfaceContainerHighest,
       shape: const CircleBorder(),
       child: InkWell(
         customBorder: const CircleBorder(),
         onTap: onTap,
         child: SizedBox(
-          width: 72,
-          height: 72,
+          width: _size,
+          height: _size,
           child: Icon(
             CupertinoIcons.mic_fill,
-            size: 30,
-            color: active || onTap != null
-                ? scheme.onPrimary
-                : scheme.onSurfaceVariant,
+            size: 18,
+            color: lit ? scheme.onPrimary : scheme.onSurfaceVariant,
           ),
         ),
       ),
     );
     return SizedBox(
-      width: 130,
-      height: 130,
+      width: _size + 26,
+      height: _size + 26,
       child: Stack(
         alignment: Alignment.center,
         children: [
@@ -451,14 +709,14 @@ class _MicOrb extends StatelessWidget {
             height: halo,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: scheme.primary.withValues(alpha: active ? 0.16 : 0.06),
+              color: scheme.primary.withValues(alpha: active ? 0.18 : 0.06),
             ),
           ),
           if (busy)
             const SizedBox(
-              width: 86,
-              height: 86,
-              child: CircularProgressIndicator(strokeWidth: 3),
+              width: _size + 8,
+              height: _size + 8,
+              child: CircularProgressIndicator(strokeWidth: 2.5),
             ),
           if (tooltip == null)
             button

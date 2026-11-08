@@ -59,7 +59,10 @@ void main() {
     });
 
     test('anything that is not a command is a search', () {
-      expectUrl('What is the capital of France', google('what is the capital of france'));
+      expectUrl(
+        'What is the capital of France',
+        google('what is the capital of france'),
+      );
       expectUrl('ایران', google('ایران'));
     });
 
@@ -207,5 +210,147 @@ void main() {
     expect(parseVoiceCommand('[BLANK_AUDIO]'), isNull);
     expect(parseVoiceCommand('Search.'), isNull);
     expect(parseVoiceCommand('سرچ کن'), isNull);
+  });
+
+  group('numbered results', () {
+    void expectResult(String heard, int number, {bool newTab = false}) {
+      final action = parseVoiceCommand(heard);
+      expect(action, isA<VoiceOpenResult>(), reason: heard);
+      action as VoiceOpenResult;
+      expect(action.number, number, reason: heard);
+      expect(action.newTab, newTab, reason: heard);
+    }
+
+    test('Persian', () {
+      expectResult('لینک دوم گوگل رو باز کن', 2);
+      expectResult('لینک دوم رو باز کن', 2);
+      expectResult('لینک اول', 1);
+      expectResult('دومین لینک رو باز کن', 2);
+      expectResult('اولین نتیجه', 1);
+      expectResult('نتیجه سوم', 3);
+      expectResult('برو لینک چهارم', 4);
+      expectResult('روی لینک پنجم کلیک کن', 5);
+      expectResult('لینک شماره شش رو باز کن', 6);
+      expectResult('لینک ۷ رو باز کن', 7);
+      expectResult('لینک هشتم تو گوگل', 8);
+      expectResult('سایت نهم رو باز کن', 9);
+      expectResult('لینک دهم رو باز کن', 10);
+      expectResult('ویدیوی دوم رو پخش کن', 2);
+      expectResult('لطفا لینک‌ دوم رو باز کن', 2);
+      expectResult('لینک سوم رو تو تب جدید باز کن', 3, newTab: true);
+    });
+
+    test('English', () {
+      expectResult('Open the second link.', 2);
+      expectResult('open the second Google result', 2);
+      expectResult('first result', 1);
+      expectResult('click on the third link', 3);
+      expectResult('open link 4', 4);
+      expectResult('open result number five', 5);
+      expectResult('the 6th one', 6);
+      expectResult('play the second video', 2);
+      expectResult('open the tenth link on Google', 10);
+      expectResult('open the second link in a new tab', 2, newTab: true);
+    });
+
+    test('Danish', () {
+      expectResult('Åbn det andet link.', 2);
+      expectResult('første resultat', 1);
+      expectResult('klik på det tredje link', 3);
+      expectResult('link nummer fire', 4);
+    });
+
+    test('other words stay what they were', () {
+      expectUrl('open YouTube', 'https://www.youtube.com/');
+      expectUrl('play one direction', youtube('one direction'));
+      expectUrl('سایت دیوار رو باز کن', 'https://divar.ir/');
+      expectCommand('next tab', BrowserCommand.nextTab);
+    });
+  });
+
+  group('pages of results', () {
+    void expectPage(
+      String heard, {
+      int step = 0,
+      int? number,
+      BrowserCommand? otherwise,
+    }) {
+      final action = parseVoiceCommand(heard);
+      expect(action, isA<VoiceResultsPage>(), reason: heard);
+      action as VoiceResultsPage;
+      expect(action.step, step, reason: heard);
+      expect(action.number, number, reason: heard);
+      expect(action.otherwise, otherwise, reason: heard);
+    }
+
+    test('next and previous', () {
+      expectPage('برو صفحه بعد گوگل', step: 1);
+      expectPage('صفحه بعدی نتایج', step: 1);
+      expectPage('نتایج بعدی', step: 1);
+      expectPage('next page of Google', step: 1);
+      expectPage('more results', step: 1);
+      expectPage('næste side af resultaterne', step: 1);
+      expectPage('صفحه قبل گوگل', step: -1);
+      expectPage('previous page of results', step: -1);
+    });
+
+    test('a plain "next page" is Forward away from results', () {
+      for (final heard in [
+        'next page',
+        'go to the next page',
+        'برو صفحه بعد',
+        'صفحه بعدی',
+        'næste side',
+      ]) {
+        expectPage(heard, step: 1, otherwise: BrowserCommand.forward);
+      }
+      // "previous page" stays Back.
+      expectCommand('previous page', BrowserCommand.back);
+      expectCommand('برو صفحه قبل', BrowserCommand.back);
+    });
+
+    test('by number', () {
+      expectPage('صفحه دوم گوگل', number: 2);
+      expectPage('برو صفحه سوم', number: 3);
+      expectPage('دومین صفحه', number: 2);
+      expectPage('page 4', number: 4);
+      expectPage('go to the second page of the results', number: 2);
+      expectPage('side 2', number: 2);
+      // Not page numbers.
+      expectCommand('برو صفحه اصلی', BrowserCommand.home);
+      expectCommand('home page', BrowserCommand.home);
+    });
+  });
+
+  test('stop listening', () {
+    for (final heard in [
+      'Stop listening.',
+      'turn off the microphone',
+      'دیگه گوش نده',
+      'میکروفون رو خاموش کن',
+      'stop med at lytte',
+    ]) {
+      expect(
+        parseVoiceCommand(heard),
+        isA<VoiceStopListening>(),
+        reason: heard,
+      );
+    }
+    // Stop loading stays.
+    expectCommand('stop', BrowserCommand.stop);
+  });
+
+  test('without free text, only commands and addresses', () {
+    VoiceAction? strict(String heard) =>
+        parseVoiceCommand(heard, searchFreeText: false);
+    expect(strict('and then we went to the market'), isNull);
+    expect(strict('ایران'), isNull);
+    expect(strict('search Iran'), isA<VoiceNavigate>());
+    expect(strict('YouTube'), isA<VoiceNavigate>());
+    expect(
+      (strict('digikala.com') as VoiceNavigate).url,
+      'http://digikala.com',
+    );
+    expect(strict('go back'), isA<VoiceRunCommand>());
   });
 }

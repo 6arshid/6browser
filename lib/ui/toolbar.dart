@@ -518,7 +518,6 @@ class _Omnibox extends ConsumerWidget {
                                           ),
                                           child: VoiceMicButton(
                                             key: micKey,
-                                            view: view,
                                             color: colors.omniboxText,
                                             size: 19,
                                             width: 38,
@@ -538,11 +537,8 @@ class _Omnibox extends ConsumerWidget {
                                         _ZoomChip(view: view),
                                         VoiceMicButton(
                                           key: micKey,
-                                          view: view,
                                           color: colors.omniboxText,
-                                          tooltip:
-                                              'Voice command '
-                                              '(${shortcutFor(BrowserCommand.voiceCommand)})',
+                                          showShortcut: true,
                                         ),
                                         _BookmarkStar(view: view),
                                         _ReloadButton(
@@ -853,6 +849,7 @@ class _MainMenu extends ConsumerWidget {
     final commands = BrowserCommands.maybeOf(context);
     final pageTools = view?.supportsPageTools ?? false;
     final voice = ref.watch(speechInputProvider) != null && view != null;
+    final voiceOn = ref.watch(voiceModeProvider);
 
     PopupMenuItem<String> item(
       String value,
@@ -939,7 +936,8 @@ class _MainMenu extends ConsumerWidget {
           item(
             BrowserCommand.voiceCommand.name,
             CupertinoIcons.mic,
-            'Voice command…',
+            'Voice commands',
+            checked: voiceOn,
             shortcut: shortcutFor(BrowserCommand.voiceCommand),
           ),
         const PopupMenuDivider(),

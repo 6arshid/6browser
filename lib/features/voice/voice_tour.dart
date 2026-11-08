@@ -533,7 +533,7 @@ class _VoiceTourState extends ConsumerState<VoiceTour>
                 icon: CupertinoIcons.keyboard,
                 text:
                     'Press ${shortcutFor(BrowserCommand.voiceCommand)} on '
-                    'any page to start listening.',
+                    'any page to turn listening on or off.',
               ),
           ],
         );
