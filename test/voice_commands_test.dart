@@ -340,6 +340,135 @@ void main() {
     expectCommand('stop', BrowserCommand.stop);
   });
 
+  group('scrolling', () {
+    void expectScroll(String heard, ScrollMove move) {
+      // The same whether or not other words are searched for.
+      for (final searchFreeText in [true, false]) {
+        final action = parseVoiceCommand(heard, searchFreeText: searchFreeText);
+        expect(action, isA<VoiceScroll>(), reason: heard);
+        expect((action as VoiceScroll).move, move, reason: heard);
+      }
+    }
+
+    test('English', () {
+      expectScroll('Scroll.', ScrollMove.down);
+      expectScroll('scroll down', ScrollMove.down);
+      expectScroll('Scroll down a bit, please.', ScrollMove.down);
+      expectScroll('scroll the page down', ScrollMove.down);
+      expectScroll('keep scrolling', ScrollMove.down);
+      expectScroll('page down', ScrollMove.down);
+      expectScroll('go down', ScrollMove.down);
+      expectScroll('scroll up', ScrollMove.up);
+      expectScroll('Scroll back up.', ScrollMove.up);
+      expectScroll('page up', ScrollMove.up);
+      expectScroll('scroll to the top', ScrollMove.top);
+      expectScroll('back to top', ScrollMove.top);
+      expectScroll('go to the top of the page', ScrollMove.top);
+      expectScroll('scroll to the bottom', ScrollMove.bottom);
+      expectScroll('go to the end', ScrollMove.bottom);
+      expectScroll('bottom of the page', ScrollMove.bottom);
+    });
+
+    test('Persian', () {
+      expectScroll('اسکرول', ScrollMove.down);
+      expectScroll('اسکرول کن.', ScrollMove.down);
+      expectScroll('اسکرول کن پایین', ScrollMove.down);
+      expectScroll('پایین اسکرول کن', ScrollMove.down);
+      expectScroll('صفحه رو اسکرول کن', ScrollMove.down);
+      expectScroll('برو پایین', ScrollMove.down);
+      expectScroll('یکم برو پایین‌تر', ScrollMove.down);
+      expectScroll('صفحه رو بکش پایین', ScrollMove.down);
+      expectScroll('لطفا بیا پایین', ScrollMove.down);
+      expectScroll('برو بالا', ScrollMove.up);
+      expectScroll('اسکرول به بالا', ScrollMove.up);
+      expectScroll('بالا', ScrollMove.up);
+      expectScroll('برو بالای صفحه', ScrollMove.top);
+      expectScroll('اول صفحه', ScrollMove.top);
+      expectScroll('برگرد بالا', ScrollMove.top);
+      expectScroll('برو آخر صفحه', ScrollMove.bottom);
+      expectScroll('ته صفحه', ScrollMove.bottom);
+      expectScroll('برو تا پایین', ScrollMove.bottom);
+    });
+
+    test('Danish', () {
+      expectScroll('Scroll ned.', ScrollMove.down);
+      expectScroll('rul ned', ScrollMove.down);
+      expectScroll('kan du rulle lidt ned', ScrollMove.down);
+      expectScroll('rul op', ScrollMove.up);
+      expectScroll('gå op', ScrollMove.up);
+      expectScroll('til toppen', ScrollMove.top);
+      expectScroll('gå til bunden af siden', ScrollMove.bottom);
+      expectScroll('rul helt ned', ScrollMove.bottom);
+    });
+
+    test('other languages', () {
+      expectScroll('Nach unten scrollen.', ScrollMove.down);
+      expectScroll('Scroll mal hoch.', ScrollMove.up);
+      expectScroll('Ganz nach oben', ScrollMove.top);
+      expectScroll('Défile vers le bas.', ScrollMove.down);
+      expectScroll('Fais défiler vers le haut', ScrollMove.up);
+      expectScroll('Desplázate hacia abajo.', ScrollMove.down);
+      expectScroll('¡Sube!', ScrollMove.up);
+      expectScroll('Rolar para baixo', ScrollMove.down);
+      expectScroll("Scorri verso l'alto", ScrollMove.up);
+      expectScroll('Naar beneden scrollen', ScrollMove.down);
+      expectScroll('Scrolla ner', ScrollMove.down);
+      expectScroll('Aşağı kaydır.', ScrollMove.down);
+      expectScroll('Прокрути вниз.', ScrollMove.down);
+      expectScroll('Прокрути вверх', ScrollMove.up);
+      expectScroll('Przewiń w dół', ScrollMove.down);
+      expectScroll('انزل للأسفل', ScrollMove.down);
+      expectScroll('向下滚动。', ScrollMove.down);
+      expectScroll('下にスクロールしてください。', ScrollMove.down);
+      expectScroll('위로 스크롤해줘', ScrollMove.up);
+    });
+
+    test('"scroll" said in any other language', () {
+      expectScroll('Skrollaa alas.', ScrollMove.down); // Finnish
+      expectScroll('Skrollaa ylös.', ScrollMove.up);
+      expectScroll('Scrollează în sus', ScrollMove.up); // Romanian
+    });
+
+    test('other words stay what they were', () {
+      expectUrl('search scroll saw', google('scroll saw'));
+      expectUrl('open my scrolling app', google('my scrolling'));
+      expectCommand('go back', BrowserCommand.back);
+      expectCommand('go home', BrowserCommand.home);
+      expect(
+        (parseVoiceCommand('the top result')! as VoiceOpenResult).number,
+        1,
+      );
+      expect(
+        (parseVoiceCommand('صفحه اول گوگل')! as VoiceResultsPage).number,
+        1,
+      );
+    });
+  });
+
+  test('close the browser', () {
+    for (final heard in [
+      'Close the browser.',
+      'close browser',
+      'exit the app',
+      'مرورگر رو ببند',
+      'براوزر رو ببند',
+      'ببند مرورگر رو',
+      'لطفا از مرورگر خارج شو',
+      'Luk browseren.',
+      'Browser schließen',
+      'Ferme le navigateur.',
+      'Cierra el navegador',
+      'Закрой браузер.',
+    ]) {
+      expectCommand(heard, BrowserCommand.closeWindow);
+    }
+    // A plain "close" is still the tab.
+    expectCommand('close', BrowserCommand.closeTab);
+    expectCommand('ببند', BrowserCommand.closeTab);
+    expectCommand('این تب رو ببند', BrowserCommand.closeTab);
+    expectCommand('luk fanen', BrowserCommand.closeTab);
+  });
+
   test('without free text, only commands and addresses', () {
     VoiceAction? strict(String heard) =>
         parseVoiceCommand(heard, searchFreeText: false);

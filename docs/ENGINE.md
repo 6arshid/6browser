@@ -430,6 +430,25 @@ change Google's `start` / Bing's `first`; on DuckDuckGo "next page" presses
 "More results"; YouTube has no pages. A plain "next page" / «صفحه بعد» away
 from results pages is Forward; "previous page" is always Back.
 
+**Scrolling and closing the browser** (2026-11-09): "scroll" / "scroll
+down" / «اسکرول» / «برو پایین» / "rul ned" scroll about a screen (80% of the
+window), "scroll up" / «برو بالا» back, "scroll to the top" / «برو بالای
+صفحه» / "to the bottom" / «ته صفحه» to the ends (`VoiceScroll`,
+`lib/features/voice/page_scroll.dart`). These and "close the browser" /
+«مرورگر رو ببند» / "luk browseren" (`BrowserCommand.closeWindow`: the whole
+app; on Android `SystemNavigator.pop`) are also understood in the main
+other languages (de, fr, es, pt, it, nl, sv, no, tr, ru, uk, pl, ar, he,
+hi, zh, ja, ko, id, vi), and any short phrase with the loanword "scroll"
+(«اسکرول», "скролл", "skrollaa") scrolls, up when it says so. The page
+script scrolls the document when it can move that way, else the scrolling
+box under the middle of the window or around it, else the largest one on
+screen (web mail, chats); if the box that would scroll is at its end it
+answers `moved: false` and the dock says "This is the end of the page."
+Checked in headless Edge with `--force-prefers-reduced-motion` on a long
+page, a Gmail-like page (document fixed, sidebar + main box) and a page
+with a fixed overlay in the middle; without reduced motion the scroll is
+`behavior: smooth` (not visible headless).
+
 **First-run tour** (`lib/features/voice/voice_tour.dart`): 1.2 s after the
 first tabs appear, if the `voiceTourSeen` setting is unset, a spotlight
 closes in on the address bar microphone and a three-step card explains it

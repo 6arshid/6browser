@@ -256,7 +256,13 @@ class _BrowserShellState extends ConsumerState<BrowserShell> {
         final a = state.active;
         if (a != null) ctl.close(a.id);
       case BrowserCommand.closeWindow:
-        ServicesBinding.instance.exitApplication(AppExitType.cancelable);
+        // Android has no "exit application" request: leave the app as
+        // Back on the last screen does.
+        if (defaultTargetPlatform == TargetPlatform.android) {
+          SystemNavigator.pop();
+        } else {
+          ServicesBinding.instance.exitApplication(AppExitType.cancelable);
+        }
       case BrowserCommand.nextTab:
         ctl.cycle();
       case BrowserCommand.previousTab:

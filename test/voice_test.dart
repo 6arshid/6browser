@@ -682,6 +682,61 @@ void main() {
       expect(find.byIcon(CupertinoIcons.checkmark_circle_fill), findsOneWidget);
     });
 
+    testWidgets('scrolls the page, and says when it cannot go further', (
+      tester,
+    ) async {
+      final c = await pump(tester);
+      await openPage(tester, c);
+      await turnOn(tester);
+      final view = active(c);
+
+      speech.say('scroll down');
+      await tester.pump();
+      expect(view.scripts.last, contains('("down", "'));
+      expect(view.scripts.last, contains('fakePost'));
+      pageAnswers(view, {'moved': true});
+      await tester.pumpAndSettle();
+      expect(find.byIcon(CupertinoIcons.checkmark_circle_fill), findsOneWidget);
+      expect(find.text('Listening…'), findsOneWidget);
+
+      speech.say('برو بالای صفحه');
+      await tester.pump();
+      expect(view.scripts.last, contains('("top", "'));
+      pageAnswers(view, {'moved': false});
+      await tester.pumpAndSettle();
+      expect(find.text('This is the top of the page.'), findsOneWidget);
+      expect(find.text('Listening…'), findsOneWidget);
+      expect(activeUrl(c), 'https://example.com/');
+    });
+
+    // On Android it leaves the app. (The test binding drops desktop exit
+    // requests, so the Windows branch, shared with Ctrl+Shift+W, is not
+    // seen here.)
+    testWidgets('"close browser" closes 6browser, not just the tab', (
+      tester,
+    ) async {
+      final calls = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          calls.add(call.method);
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      final c = await pump(tester);
+      await openPage(tester, c);
+      await turnOn(tester);
+      await say(tester, 'مرورگر رو ببند');
+      expect(calls, contains('SystemNavigator.pop'));
+      expect(c.read(tabsProvider).tabs, hasLength(1));
+    }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+
     testWidgets('pauses while a page covers the browser', (tester) async {
       final c = await pump(tester);
       await openPage(tester, c);

@@ -60,6 +60,32 @@ class VoiceResultsPage extends VoiceAction {
       '${otherwise != null ? ', else ${otherwise!.name}' : ''})';
 }
 
+/// Which way to scroll the page.
+enum ScrollMove {
+  /// About a screen down.
+  down,
+
+  /// About a screen up.
+  up,
+
+  /// To the top of the page.
+  top,
+
+  /// To the bottom of the page.
+  bottom,
+}
+
+/// Scroll the page ("scroll", "scroll up", «برو پایین», "rul ned", "nach
+/// unten scrollen", "scroll to the top").
+class VoiceScroll extends VoiceAction {
+  const VoiceScroll(this.move);
+
+  final ScrollMove move;
+
+  @override
+  String toString() => 'VoiceScroll(${move.name})';
+}
+
 /// Stop listening for voice commands ("stop listening", «دیگه گوش نده»).
 class VoiceStopListening extends VoiceAction {
   const VoiceStopListening();
@@ -93,6 +119,9 @@ VoiceAction? parseVoiceCommand(
   }
 
   if (_stopListening.hasMatch(text)) return const VoiceStopListening();
+  // Before pages of results: «اول صفحه» is the top of the page, not page
+  // one.
+  if (_scrollMove(text) case final move?) return VoiceScroll(move);
   if (_resultsPage(text) case final page?) return page;
   if (_resultNumber(text) case final number?) {
     return VoiceOpenResult(number, newTab: newTab);
@@ -139,6 +168,10 @@ VoiceAction? parseVoiceCommand(
       _siteNamed(target)?.url ?? _spokenAddress(target) ?? search(target),
     );
   }
+
+  // "Scroll" in a language without its own words for it. Last, so that
+  // "search scroll saw" stays a search.
+  if (_scrollAnyLanguage(text) case final move?) return VoiceScroll(move);
 
   // No command: like typing in the address bar.
   final url = resolveInput(text, searchTemplate: searchTemplate);
@@ -327,6 +360,328 @@ VoiceResultsPage? _resultsPage(String text) {
   return null;
 }
 
+// Scrolling the page and closing the browser are understood in English,
+// Persian and Danish like every command, and also in the main other
+// languages; and "scroll" is a loanword almost everywhere (see
+// _scrollAnyLanguage).
+
+const _aBitEn =
+    '(?: (?:a (?:bit|little)(?: more)?|a little bit|some(?: more)?|more|'
+    'further|again))?';
+const _thePageEn = '(?: (?:the |this )?page| it)?';
+
+const _scrollFa = '(?:اسکرول|اسکرال)';
+const _downFa = '(?:پایین|پائین)(?: ?تر)?';
+const _upFa = 'بالا(?: ?تر)?';
+const _moveFa =
+    '(?:برو|بیا|بریم|بکش|بکشش|ببر|ببرش|بده|بدش|بفرست|برو به|'
+    '$_scrollFa(?: کن| بکن)?)';
+const _aBitFa =
+    '(?:(?:یکم|یه کم|یک کم|کمی|یه ذره|یه خورده|یکمی|باز|بازم|بیشتر) )?';
+const _pageFa = '(?:صفحه$_object )?';
+
+// Danish, Norwegian and Swedish.
+const _scrollNordic =
+    '(?:scroll|scrolle|scroller|scrolla|skrol|skrolle|skrolla|rul|rull|'
+    'rulle|ruller|rulla|bladr|bladre|bläddra)';
+const _downNordic = '(?:ned|nedad|nedover|ner|nedåt)';
+const _upNordic = '(?:op|opad|opp|oppover|upp|uppåt)';
+const _aBitNordic =
+    '(?: (?:lidt|litt|lite|mere|mer|lidt mere|litt mer|lite till|længere|'
+    'lengre|igen))?';
+const _theSiteNordic = '(?: siden| sidan)?';
+// "rul lidt ned"
+const _littleNordic = '(?: (?:lidt|litt|lite))?';
+const _ofTheSiteNordic = '(?: af siden| av siden| på sidan)?';
+
+const _scrollDe =
+    '(?:scroll|scrolle|scrollen|blättere|blätter|blättern|geh|gehe)';
+const _scrollFr =
+    '(?:fais |faire )?(?:défiler|défile|défilez|scroller|scrolle)'
+    '(?: la page)?';
+const _pageEs = '(?: la página| la pagina)?';
+const _scrollEs =
+    '(?:desplázate|desplazate|desplaza|desplazar|haz scroll)$_pageEs';
+const _pagePt = '(?: a página| a pagina)?';
+const _scrollPt = '(?:rolar|role|rola|deslize|deslizar|desliza)$_pagePt';
+const _scrollIt = '(?:scorri|scorrere|scrolla|scrollare)(?: la pagina)?';
+const _scrollNl = '(?:scroll|scrollen|scrol)';
+const _scrollRu =
+    '(?:прокрути|прокрутите|прокрутить|листай|листайте|пролистай|'
+    'пролистайте|скролль|скрольни|гортай|прокрутіть)(?: страницу| сторінку)?';
+const _scrollHi = 'स्क्र(?:ॉ|ो)ल(?: (?:करो|करें|कीजिए|कर दो))?';
+const _scrollZh = '(?:滚动|滾動|滑动|滑動|滑|翻|拉)?(?:一下)?';
+const _scrollJa = 'スクロール(?:して|する)?(?:ください)?';
+const _scrollKo = '스크롤(?: ?(?:해 ?줘|해|하기))?';
+const _pageAr = '(?: الصفحه)?';
+
+final _scrollToTop = _full(
+  [
+    '(?:(?:scroll|go|jump|move|take me|get me|bring me|head)(?: back)?'
+        '(?: all the way)?(?: up)? )?(?:back )?(?:to )?(?:the )?(?:very )?'
+        'top(?: of (?:the |this )?page)?',
+    '(?:scroll|go|move) all the way up',
+    '(?:(?:$_moveFa|برگرد|بپر) )?(?:(?:به|تا) )?(?:بالای|اول|ابتدای|سر)'
+        '(?: ی)? صفحه(?: $_moveFa)?',
+    '(?:(?:$_moveFa|برگرد) )?تا (?:خود )?بالا(?: $_moveFa)?',
+    'برگرد بالا',
+    '(?:(?:$_scrollNordic|gå|hop|hopp|spring) )?(?:helt |heilt )?'
+        '(?:$_upNordic )?(?:til |till )?toppen$_ofTheSiteNordic',
+    '(?:(?:$_scrollNordic|gå) )?(?:helt|heilt|längst) $_upNordic',
+    '(?:(?:$_scrollDe|spring|springe) )?(?:ganz nach oben|nach ganz oben|'
+        '(?:zum|an den) (?:seiten)?anfang(?: der seite)?)',
+    '(?:(?:va|aller|allez|remonte|remonter|retourne|retourner) )?'
+        '(?:tout )?en haut(?: de la page)?',
+    '(?:(?:va|aller|allez|retourne) )?au début(?: de la page)?',
+    '(?:(?:ve|ir|vuelve|volver|vete) )?'
+        '(?:al (?:principio|inicio)|hasta arriba|arriba del todo)'
+        '(?: de la página| de la pagina)?',
+    '(?:(?:vá|va|ir|volte|voltar|volta) )?(?:para o|pro|ao) '
+        '(?:topo|início|inicio)(?: da página| da pagina)?',
+    "(?:(?:vai|torna) )?(?:all'inizio|in cima)(?: della pagina)?",
+    '(?:(?:ga|$_scrollNl) )?(?:helemaal naar boven|'
+        'naar de (?:top|bovenkant)(?: van de pagina)?)',
+    '(?:sayfanın |sayfanin )?(?:en üste|en yukarı|en yukarıya|başına|basina)'
+        ' (?:git|çık|dön)',
+    '(?:(?:перейди|вернись|иди|перейдіть|повернись) )?'
+        '(?:в начало|к началу|на початок|в самый верх|нагору)'
+        '(?: страницы| сторінки)?',
+    '(?:przewiń |idź )?na (?:samą górę|początek)(?: strony)?',
+    '(?:(?:اذهب|إذهب|ارجع|إرجع) )?(?:إلی|الی) (?:أعلی|اعلی|بدایه|أول|اول)'
+        ' الصفحه',
+    '(?:לך |עבור )?(?:לראש|להתחלת) הדף',
+    '(?:回到|返回|到|去)?(?:顶部|頂部|最上面|页首|頁首)',
+    '(?:一番上|ページの先頭|トップ)(?:に|へ)?(?:戻って|移動して|行って)?(?:ください)?',
+    '맨 ?위로(?: ?(?:가 ?줘|가|이동))?',
+  ].join('|'),
+);
+
+final _scrollToBottom = _full(
+  [
+    '(?:(?:scroll|go|jump|move|take me|get me|head)(?: all the way)?'
+        '(?: down)? )?(?:to )?(?:the )?(?:very )?'
+        '(?:bottom(?: of (?:the |this )?page)?|end of (?:the |this )?page)',
+    '(?:(?:scroll|go|jump|move) )?(?:all the way )?(?:down )?to the end',
+    '(?:scroll|go|move) all the way down',
+    '(?:(?:$_moveFa|بپر) )?(?:(?:به|تا) )?(?:پایین|پائین|آخر|انتهای|ته)'
+        '(?: ی)? صفحه(?: $_moveFa)?',
+    '(?:$_moveFa )?تا (?:ته|آخر|خود پایین|پایین)(?: $_moveFa)?',
+    '(?:(?:$_scrollNordic|gå|hop|hopp|spring) )?(?:helt |heilt )?'
+        '(?:$_downNordic )?(?:til |till )?(?:bunden|bunnen|botten)'
+        '$_ofTheSiteNordic',
+    '(?:(?:$_scrollNordic|gå) )?(?:helt|heilt|längst) $_downNordic',
+    '(?:(?:$_scrollDe|spring|springe) )?(?:ganz nach unten|nach ganz unten|'
+        '(?:zum|ans) (?:seiten)?ende(?: der seite)?)',
+    '(?:(?:va|aller|allez|descends|descendre) )?(?:tout )?en bas'
+        '(?: de la page)?',
+    '(?:(?:va|aller|allez) )?(?:à la|a la) fin(?: de la page)?',
+    '(?:(?:ve|ir|vete) )?(?:al final|hasta abajo|abajo del todo)'
+        '(?: de la página| de la pagina)?',
+    '(?:(?:vá|va|ir) )?(?:para o|pro|ao) (?:fim|final)'
+        '(?: da página| da pagina)?',
+    '(?:vai )?(?:alla fine|in fondo)(?: della pagina)?',
+    '(?:(?:ga|$_scrollNl) )?(?:helemaal naar beneden|'
+        'naar (?:de onderkant|het einde)(?: van de pagina)?)',
+    '(?:sayfanın |sayfanin )?(?:en alta|en aşağı|en aşağıya|sonuna)'
+        ' (?:git|in)',
+    '(?:(?:перейди|иди) )?(?:в конец|к концу|в кінець|в самый низ)'
+        '(?: страницы| сторінки)?',
+    '(?:przewiń |idź )?na (?:sam dół|koniec)(?: strony)?',
+    '(?:(?:اذهب|إذهب) )?(?:إلی|الی) (?:أسفل|اسفل|نهایه|آخر|اخر) الصفحه',
+    '(?:לך |עבור )?(?:לסוף|לתחתית) הדף',
+    '(?:到|去)?(?:底部|最下面|页尾|頁尾)',
+    '(?:一番下|ページの最後|ページの一番下)(?:に|へ)?(?:移動して|行って)?(?:ください)?',
+    '맨 ?(?:아래|밑)로(?: ?(?:가 ?줘|가|이동))?',
+  ].join('|'),
+);
+
+final _scrollUp = _full(
+  [
+    '(?:scroll|scrolling)$_thePageEn(?: back)? up(?:wards?)?'
+        '(?: the page)?$_aBitEn',
+    '(?:page|move|go) up(?: the page)?$_aBitEn',
+    'up(?:wards?)?$_aBitEn',
+    '$_aBitFa$_pageFa(?:$_moveFa )?(?:(?:به|رو به|سمت) )?$_upFa'
+        '(?: $_moveFa)?',
+    '$_scrollNordic$_theSiteNordic$_littleNordic $_upNordic$_aBitNordic',
+    '(?:(?:gå|kør|kjør|side) )?(?:(?:lidt|litt|lite) )?$_upNordic$_aBitNordic',
+    '(?:$_scrollDe )?(?:mal )?(?:nach oben|hoch|rauf)'
+        '(?: (?:scrollen|blättern|gehen))?',
+    '$_scrollFr vers le haut',
+    '(?:monte|monter|montez|remonte|remonter|remontez)(?: la page)?'
+        '(?: un peu)?',
+    'vers le haut',
+    '$_scrollEs (?:hacia |para )?arriba',
+    '(?:sube|subir|suba)$_pageEs(?: un poco)?',
+    '(?:hacia |para )?arriba',
+    '$_scrollPt (?:para|pra) cima',
+    '(?:sobe|subir|suba)$_pagePt(?: um pouco)?',
+    '(?:para|pra) cima',
+    "$_scrollIt (?:verso l'alto|in alto|su)",
+    '(?:vai |torna )?su(?: un po)?',
+    '(?:$_scrollNl )?(?:naar boven|omhoog)(?: $_scrollNl)?',
+    '(?:sayfayı |sayfayi )?(?:yukarı|yukari)(?: (?:kaydır|kaydir|çık|cik|git))?',
+    '$_scrollRu (?:вверх|наверх|вгору|догори)',
+    '(?:вверх|наверх|вгору|догори)',
+    'przewiń(?: stronę)? (?:w górę|do góry)',
+    '(?:w górę|do góry)',
+    '(?:اصعد|إصعد|اطلع)(?: (?:لفوق|فوق|للأعلی|لأعلی|للاعلی|لاعلی))?',
+    '(?:مرر|اسحب|حرک)$_pageAr (?:لأعلی|للأعلی|لاعلی|للاعلی|إلی الأعلی|'
+        'الی الاعلی|الی الأعلی|إلی الاعلی|لفوق|فوق)',
+    'גלול למעלה',
+    '(?:עלה|תעלה|לעלות) למעלה',
+    'ऊपर $_scrollHi',
+    'ऊपर (?:जाओ|जाएं|जाइए|चलो)',
+    '(?:向上|往上)$_scrollZh',
+    '上滑',
+    '(?:上に?|上へ)$_scrollJa',
+    '(?:위로 )$_scrollKo',
+    '스크롤 ?업(?: ?(?:해 ?줘|해))?',
+    '위로 (?:올려 ?줘|올려|가 ?줘)',
+    '(?:gulir|scroll|geser)(?: ke)? atas',
+    'cuộn lên(?: trên)?',
+  ].join('|'),
+);
+
+final _scrollDown = _full(
+  [
+    // "Scroll" alone scrolls down.
+    '(?:keep )?(?:scroll|scrolling)$_thePageEn(?: down(?:wards?)?)?'
+        '(?: the page)?$_aBitEn',
+    '(?:page|move|go) down(?: the page)?$_aBitEn',
+    'down(?:wards?)?$_aBitEn',
+    '$_pageFa$_scrollFa(?: کن| بکن)?',
+    '$_aBitFa$_pageFa(?:$_moveFa )?(?:(?:به|رو به|سمت) )?$_downFa'
+        '(?: $_moveFa)?',
+    '$_scrollNordic$_theSiteNordic$_littleNordic(?: $_downNordic)?$_aBitNordic',
+    '(?:(?:gå|kør|kjør|side) )?(?:(?:lidt|litt|lite) )?$_downNordic$_aBitNordic',
+    '(?:$_scrollDe )?(?:mal )?(?:nach unten|runter)'
+        '(?: (?:scrollen|blättern|gehen))?',
+    'scrolle|scrollen',
+    '$_scrollFr(?: vers le bas)?',
+    '(?:descends|descendre|descend|descendez)(?: la page)?(?: un peu)?',
+    'vers le bas',
+    '$_scrollEs(?: (?:hacia |para )?abajo)?',
+    '(?:baja|bajar|baje)$_pageEs(?: un poco)?',
+    '(?:hacia |para )?abajo',
+    '$_scrollPt(?: (?:para|pra) baixo)?',
+    '(?:desce|descer|desça)$_pagePt(?: um pouco)?',
+    '(?:para|pra) baixo',
+    '$_scrollIt(?: (?:verso il basso|in basso|giù|giu))?',
+    '(?:vai |va )?(?:giù|giu)(?: un po)?',
+    '(?:$_scrollNl )?(?:naar beneden|omlaag)(?: $_scrollNl)?',
+    '(?:sayfayı |sayfayi )?(?:aşağı|asagi)(?: (?:kaydır|kaydir|in|git))?',
+    '$_scrollRu(?: вниз| донизу)?',
+    '(?:вниз|донизу)',
+    'przewiń(?: stronę)?(?: w dół| na dół)?',
+    '(?:w|na) dół',
+    '(?:انزل|إنزل|نزل)(?: (?:لتحت|تحت|للأسفل|لأسفل|للاسفل|لاسفل))?',
+    '(?:مرر|اسحب|حرک)$_pageAr(?: (?:لأسفل|للأسفل|لاسفل|للاسفل|إلی الأسفل|'
+        'الی الاسفل|الی الأسفل|إلی الاسفل|لتحت|تحت))?',
+    'גלול(?: למטה)?',
+    '(?:רד|תרד|לרדת) למטה',
+    '(?:नीचे )?$_scrollHi',
+    'नीचे (?:जाओ|जाएं|जाइए|चलो)',
+    '(?:向下|往下)$_scrollZh',
+    '下滑|下拉|(?:滚动|滾動)(?:一下)?',
+    '(?:下に?|下へ)?$_scrollJa',
+    '(?:(?:아래|밑)로 )?$_scrollKo',
+    '스크롤 ?다운(?: ?(?:해 ?줘|해))?',
+    '(?:아래|밑)로 (?:내려 ?줘|내려|가 ?줘)',
+    '(?:gulir|scroll|geser)(?: ke)? bawah',
+    'cuộn xuống(?: dưới)?',
+  ].join('|'),
+);
+
+/// Whole words, in the order tried: the top and bottom of the page before
+/// "up" and "down".
+final _scrolls = [
+  (_scrollToTop, ScrollMove.top),
+  (_scrollToBottom, ScrollMove.bottom),
+  (_scrollUp, ScrollMove.up),
+  (_scrollDown, ScrollMove.down),
+];
+
+/// Which way the page should scroll: "scroll", "scroll up", «برو پایین»,
+/// «برو بالای صفحه», "rul ned", "nach unten scrollen"; null for anything
+/// else.
+ScrollMove? _scrollMove(String text) {
+  for (final (pattern, move) in _scrolls) {
+    if (pattern.hasMatch(text)) return move;
+  }
+  return null;
+}
+
+/// The word "scroll" as it is borrowed in most languages, at the start of a
+/// word ("scrollaa", "scrollen", «اسکرول», "скролл").
+final _scrollLoanword = RegExp(
+  '(?:^|\\s)(?:scroll|skrol|skroll|скрол|اسکرول|سکرول|סקרול|σκρολ)',
+  unicode: true,
+);
+
+/// "Up" in the languages where "scroll" is borrowed.
+final _upWord = RegExp(
+  '(?:^|\\s)(?:up|upp|opp|op|hoch|oben|rauf|haut|arriba|cima|su|boven|'
+  'omhoog|yukarı|yukari|вверх|наверх|вгору|górę|góry|ylös|nahoru|nahor|'
+  'hore|fel|felfelé|sus|lên|atas|بالا|فوق|أعلی|اعلی|למעלה|πάνω)'
+  '(?=\\s|\$)',
+  unicode: true,
+);
+
+/// A short phrase with the word "scroll" in a language whose words for it
+/// are not known ("skrollaa alas", "scrollează în sus"): down, or up when it
+/// says so. Null for anything else.
+ScrollMove? _scrollAnyLanguage(String text) {
+  if (!_scrollLoanword.hasMatch(text) || text.split(' ').length > 4) {
+    return null;
+  }
+  return _upWord.hasMatch(text) ? ScrollMove.up : ScrollMove.down;
+}
+
+/// Closing the browser (the whole app, every tab): "close the browser",
+/// «مرورگر رو ببند», "luk browseren", "Browser schließen".
+const _browserFa =
+    '(?:مرورگر|براوزر|بروزر|برازر|برنامه|پنجره|شش ?براوزر|سیکس ?براوزر|'
+    'browser)';
+final _closeBrowser = _full(
+  [
+    '(?:close|exit|quit|shut(?: down)?)(?: the| this)? (?:browser|window|app|'
+        'application|program|6 ?browser|six browser)',
+    '(?:close|exit|quit) everything',
+    '(?:این )?$_browserFa$_object (?:ببند|ببندش|بسته کن|خاموش کن|کلوز کن)',
+    '(?:ببند|بستن|کلوز)(?: این)? $_browserFa$_object',
+    'از $_browserFa (?:خارج شو|بیا بیرون|برو بیرون)',
+    'luk(?: for)? (?:browseren|browser|vinduet|programmet|appen|6 ?browser)',
+    'afslut (?:browseren|browser|programmet|appen)',
+    'stäng (?:webbläsaren|browsern|fönstret)',
+    'lukk (?:nettleseren|browseren|vinduet)',
+    '(?:den )?browser (?:schließen|schliessen|beenden|zumachen)',
+    '(?:schließe|schließ|schliesse|schliess|beende|mach)(?: den)? browser'
+        '(?: zu)?',
+    '(?:ferme|fermer|fermez|quitte|quitter|quittez)(?: le)? navigateur',
+    '(?:cierra|cerrar|cierre)(?: el)? navegador',
+    '(?:sal|salir) del navegador',
+    '(?:chiudi|chiudere)(?: il)? browser',
+    '(?:esci|uscire) dal browser',
+    '(?:fechar|feche|fecha)(?: o)? navegador',
+    '(?:sair|saia) do navegador',
+    '(?:sluit|sluiten)(?: de)? browser',
+    '(?:de )?browser sluiten',
+    '(?:tarayıcıyı|tarayiciyi) (?:kapat|kapa)',
+    '(?:закрой|закройте|закрыть|закрий|закрийте|закрити)(?: этот| цей)?'
+        ' браузер',
+    'zamknij(?: tę)? (?:przeglądarkę|przegladarke)',
+    '(?:أغلق|اغلق|إغلاق|اغلاق|سکر|أقفل|اقفل) المتصفح',
+    'סגור (?:את )?הדפדפן',
+    'ब्राउ(?:ज़|ज़?)र (?:बंद|बन्द) (?:करो|करें|कर दो|कीजिए)',
+    '(?:关闭|关掉|關閉|關掉)(?:浏览器|瀏覽器)',
+    'ブラウザー?を?閉じ(?:て|る)(?:ください)?',
+    '브라우저(?:를)? ?(?:닫아 ?줘|닫아|닫기|꺼 ?줘|꺼)',
+    'tutup (?:browser|peramban)',
+    'đóng trình duyệt',
+  ].join('|'),
+);
+
 /// Lower-case text with Arabic letter forms turned Persian, Persian digits
 /// turned Latin, and punctuation and whisper's non-speech markers
 /// ("[BLANK_AUDIO]", "(music)") removed. Dots inside words stay
@@ -341,6 +696,7 @@ String normalizeSpeech(String text) {
       >= 0x06F0 && <= 0x06F9 => rune - 0x06F0 + 0x30, // ۰-۹
       >= 0x0660 && <= 0x0669 => rune - 0x0660 + 0x30, // ٠-٩
       0x200C || 0x200D || 0x00A0 => 0x20, // ZWNJ, ZWJ, no-break space
+      0x2019 => 0x27, // ’ -> '
       _ => rune,
     });
   }
@@ -357,7 +713,7 @@ String normalizeSpeech(String text) {
 
 final _diacritics = RegExp('[ً-ٰٟـ]');
 final _nonSpeech = RegExp(r'\[[^\]]*\]|\([^)]*\)|\*[^*]*\*|♪');
-final _punctuation = RegExp('[!?؟,،;؛:"«»“”„…]|(?<!\\w)\'|\'(?!\\w)');
+final _punctuation = RegExp('[!?؟,،;؛:"«»“”„…¡¿。，、！？；：]|(?<!\\w)\'|\'(?!\\w)');
 final _looseDots = RegExp(r'\.+(?=\s|$)|(?<=\s|^)\.+');
 final _spaces = RegExp(r'\s+');
 
@@ -439,6 +795,8 @@ final _commands = <(RegExp, BrowserCommand)>[
     ),
     BrowserCommand.reopenClosedTab,
   ),
+  // Before closing the tab: a plain "close" or «ببند» is the tab.
+  (_closeBrowser, BrowserCommand.closeWindow),
   (
     _full(
       'close(?: this| the| current)?(?: tab)?|close it|'

@@ -14,6 +14,7 @@ import '../../ui/browser_commands.dart';
 import '../../ui/browser_theme.dart';
 import '../settings/app_settings.dart';
 import '../tabs/tabs_controller.dart';
+import 'page_scroll.dart';
 import 'search_results.dart';
 import 'speech_input.dart';
 import 'voice_commands.dart';
@@ -360,6 +361,20 @@ class _VoiceDockState extends ConsumerState<VoiceDock> {
         open(url, newTab: newTab);
       case VoiceRunCommand(:final command):
         widget.run(command);
+      case VoiceScroll(:final move):
+        if (view == null) return null;
+        final reply = await askPage(
+          view,
+          (token, post) => scrollPageScript(move, token: token, post: post),
+        );
+        if (reply == null) {
+          return 'The page did not answer. Try again once it has loaded.';
+        }
+        if (reply['moved'] == false) {
+          return move == ScrollMove.down || move == ScrollMove.bottom
+              ? 'This is the end of the page.'
+              : 'This is the top of the page.';
+        }
       case VoiceOpenResult(:final number, :final newTab):
         if (view == null) return _searchFirst;
         switch (await findResult(view, number)) {
@@ -646,14 +661,17 @@ TextDirection voiceTextDirection(String text) =>
 String _examples(VoiceLanguage language) => switch (language.code) {
   'fa' =>
     'بگویید: «جستجو کن ایران»، «برو به یوتیوب»، «لینک دوم رو باز کن»، '
-        '«صفحه بعد»، «برگرد»',
+        '«صفحه بعد»، «برگرد»، «اسکرول»، «برو بالا»، «مرورگر رو ببند»',
   'da' =>
     'Sig: “søg efter Iran”, “åbn YouTube”, “åbn det andet link”, '
-        '“næste side”, “gå tilbage”',
+        '“næste side”, “gå tilbage”, “rul ned”, “rul op”, “luk browseren”',
   'en' =>
     'Say “search Iran”, “open YouTube”, “open the second link”, '
-        '“next page”, “go back”',
-  _ => 'Say what to search for, or the name of a site to open it.',
+        '“next page”, “go back”, “scroll down”, “scroll up”, '
+        '“close browser”',
+  _ =>
+    'Say what to search for, or the name of a site to open it. '
+        '“Scroll”, “scroll up” and “close browser” work too.',
 };
 
 /// The microphone: a halo that follows the voice while listening, a ring

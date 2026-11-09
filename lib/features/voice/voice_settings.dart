@@ -32,9 +32,11 @@ class VoiceSettings extends ConsumerWidget {
           '${keyboard ? ' (or press ${shortcutFor(BrowserCommand.voiceCommand)})' : ''}'
           ' to turn voice commands on. 6browser then listens until you '
           'close the voice box in the corner: say "search Iran", "open '
-          'YouTube", "open the second link", "next page", "go back". '
-          'Commands are understood in English, Persian and Danish; in '
-          'other languages, what you say is searched for.',
+          'YouTube", "open the second link", "next page", "go back", '
+          '"scroll down", "scroll up", "scroll to the top", "close '
+          'browser". Commands are understood in English, Persian and '
+          'Danish; in other languages, what you say is searched for, but '
+          'scrolling and closing the browser work in most languages.',
           style: TextStyle(color: muted),
         ),
         Align(
